@@ -41,18 +41,28 @@ function draw() {
   canvas.height = document.body.clientHeight - 10;
   area.appendChild(canvas);
 
-  var ws = new WebSocket('wss://'+location.host+'/draw.ws');
+  var ws = new WebSocket('ws://'+location.host+'/draw.ws');
   ws.onopen = function() {
     console.log('CONNECT\n'); 
+    setInterval(() => {
+        ws.send(String.fromCharCode(9));
+	console.log('PING\n');
+    }, 45000);
   };
   ws.onclose = function() {
-    console.log('DISCONNECT'); 
+    console.log('DISCONNECT\n'); 
   };
   ws.onmessage = function(event) {
-    JSON.parse (event.data).forEach(item => {
-      ctx.strokeStyle = 'rgb(' + item[2] / 256 + ',' + item[3] / 256 + ',' + item[4] / 256 + ')';
-      ctx.strokeRect(item[0], item[1], 1, 1);
-    });
+    if (event.data.length == 0)
+      console.log ('EMPTY\n');
+    else if (event.data.length == 1
+    && event.data == String.fromCharCode(0xa))
+      console.log ('PONG\n');
+    else
+      JSON.parse (event.data).forEach(item => {
+        ctx.strokeStyle = 'rgb(' + item[2] / 256 + ',' + item[3] / 256 + ',' + item[4] / 256 + ')';
+        ctx.strokeRect(item[0], item[1], 1, 1);
+      });
   };
 
   canvas.onpointerdown = e => {
@@ -88,6 +98,7 @@ function draw() {
   }
   ctx = canvas.getContext('2d');
 
+/*
   let containers = {
     audio: true
   }
@@ -104,4 +115,5 @@ function draw() {
       }
     }
   });
+*/
 }

@@ -1,7 +1,7 @@
 all: draw.ws
 
 CC       = gcc
-WSDIR    = wsServer/
+WSDIR    = wsServer
 INCLUDE  = -I $(WSDIR)/include
 CFLAGS   = -Wall -Wextra -O2
 CFLAGS  += $(INCLUDE) -std=c99 -pthread -pedantic

@@ -90,6 +90,24 @@ void onmessage(int fd, const unsigned char *msg, uint64_t size, int type)
 #endif
     free(cli);
 
+    if (!size)
+    {
+#ifndef DISABLE_VERBOSE
+      printf("I receive a empty message.\n");
+#endif
+      return;
+    }
+    else if (size == 1
+    && msg[0] == 0x09)
+    {
+#ifndef DISABLE_VERBOSE
+      printf("I receive a ping message.\n");
+#endif
+      char pong = 0xa;
+      ws_sendframe(fd, &pong, 1, true, type);
+      return;
+    }
+
     /**
      * Mimicks the same frame type received and re-send it again
      *
