@@ -34,13 +34,27 @@ function draw() {
   sticky.appendChild(audio);
   let area = document.createElement("div");
   area.appendChild(sticky);;
+  document.body.insertBefore(area, undefined);
 
   let canvas = document.createElement("canvas");
   canvas.width = document.body.clientWidth - 10;
   canvas.height = document.body.clientHeight - 10;
   area.appendChild(canvas);
 
-  document.body.insertBefore(area, undefined);
+  var ws = new WebSocket('wss://'+location.host+'/draw.fcgi');
+  ws.onopen = function() {
+    console.log('CONNECT\n'); 
+  };
+  ws.onclose = function() {
+    console.log('DISCONNECT'); 
+  };
+  ws.onmessage = function(event) {
+    console.log('RECV: ' + event.data);
+    JSON.parse (event.data).forEach(item => {
+      ctx.strokeStyle = 'rgb(' + item[2] / 256 + ',' + item[3] / 256 + ',' + item[4] / 256 + ')';
+      ctx.strokeRect(item[0], item[1], 1, 1);
+    });
+  };
 
   canvas.onpointerdown = e => {
     stroke = [];
@@ -68,17 +82,8 @@ function draw() {
       height: canvas.height,
       stroke: stroke
     }
-    let xhttp = new XMLHttpRequest();
-    xhttp.open("POST", "/draw.fcgi", true);
-    xhttp.setRequestHeader('Content-Type', 'application/json');
-    xhttp.send(JSON.stringify(message));
+    ws.send(JSON.stringify(message));
 
-    xhttp.onload = e => {
-      JSON.parse (xhttp.response).forEach(item => {
-        ctx.strokeStyle = 'rgb(' + item[2] / 256 + ',' + item[3] / 256 + ',' + item[4] / 256 + ')';
-        ctx.strokeRect(item[0], item[1], 1, 1);
-      });
-    }
     canvas.releasePointerCapture(e.pointerId);
     canvas.onpointermove = null;
   }
