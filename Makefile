@@ -7,7 +7,7 @@ CFLAGS   = -Wall -Wextra -O2
 CFLAGS  += $(INCLUDE) -std=c99 -pthread -pedantic
 CFLAGS  += `pkg-config --cflags libmypaint json-c`
 LIB      = $(WSDIR)/libws.a
-LIB      = `pkg-config --libs libmypaint json-c`
+LIB     += `pkg-config --libs libmypaint json-c`
 LIB     += -lm
 
 # Check if verbose examples
@@ -28,4 +28,4 @@ install:
 	systemctl restart lighttpd
 
 clean:
-	rm -f draw.ws draw.c
+	rm -f draw.ws

@@ -17,6 +17,8 @@
 #include <math.h>
 #include <ws.h>
 
+#define BRUSH_FILE "/usr/share/mypaint/brushes/classic/kabura.myb"
+//#define BRUSH_FILE "/usr/share/mypaint-data/1.0/brushes/classic/kabura.myb"
 /*
  * global variable
  */
@@ -112,8 +114,7 @@ void onmessage(int fd, const unsigned char *msg, uint64_t size, int type)
     mypaint_brush_reset (brush);
     mypaint_brush_new_stroke (brush);
     mypaint_surface_begin_atomic (surface);
-    size_t i;
-    for (i = 0; i <  array_list_length(motions); i++)
+    for (int i = 0; i <  array_list_length(motions); i++)
     {
         json_object *motion = (json_object *)array_list_get_idx(motions, i);
         float x, y, pressure, xtilt, ytilt, dtime;
@@ -207,7 +208,7 @@ int main(void)
         Initialize the brush
     */
     brush = mypaint_brush_new();
-    FILE *fp = fopen ("/usr/share/mypaint-data/1.0/brushes/classic/kabura.myb", "r");
+    FILE *fp = fopen (BRUSH_FILE, "r");
     fseek (fp, 0, SEEK_END);
     int size = ftell (fp);
     rewind (fp);

@@ -41,7 +41,7 @@ function draw() {
   canvas.height = document.body.clientHeight - 10;
   area.appendChild(canvas);
 
-  var ws = new WebSocket('wss://'+location.host+'/draw.fcgi');
+  var ws = new WebSocket('wss://'+location.host+'/draw.ws');
   ws.onopen = function() {
     console.log('CONNECT\n'); 
   };
