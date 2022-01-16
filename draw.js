@@ -49,7 +49,6 @@ function draw() {
     console.log('DISCONNECT'); 
   };
   ws.onmessage = function(event) {
-    console.log('RECV: ' + event.data);
     JSON.parse (event.data).forEach(item => {
       ctx.strokeStyle = 'rgb(' + item[2] / 256 + ',' + item[3] / 256 + ',' + item[4] / 256 + ')';
       ctx.strokeRect(item[0], item[1], 1, 1);
