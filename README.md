@@ -4,6 +4,6 @@
 
 # Compile
 
-sudo apt-get install libjson-c-dev libmypaint-dev mypaint-brushes
+sudo apt-get install mypaint-brushes
 git submodule init
 git submodule update

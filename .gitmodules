@@ -1,3 +1,9 @@
 [submodule "wsServer"]
 	path = wsServer
 	url = https://github.com/Theldus/wsServer
+[submodule "libmypaint"]
+	path = libmypaint
+	url = https://github.com/mypaint/libmypaint
+[submodule "json-c"]
+	path = json-c
+	url = https://github.com/json-c/json-c
