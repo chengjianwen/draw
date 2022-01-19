@@ -42,10 +42,10 @@ function draw() {
   area.appendChild(canvas);
 
   var url;
-  if (location.protocol == 'http')
-    url = 'ws';
-  else if (location.protocol == 'https')
-    url = 'wss';
+  if (location.protocol == 'http:')
+    url = 'ws:';
+  else if (location.protocol == 'https:')
+    url = 'wss:';
   url += '://';
   url += location.host;
   url += '/draw.ws';
