@@ -46,7 +46,7 @@ function draw() {
     url = 'ws:';
   else if (location.protocol == 'https:')
     url = 'wss:';
-  url += '://';
+  url += '//';
   url += location.host;
   url += '/draw.ws';
   var ws = new WebSocket(url);
