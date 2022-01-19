@@ -4,6 +4,3 @@
 [submodule "libmypaint"]
 	path = libmypaint
 	url = https://github.com/mypaint/libmypaint
-[submodule "json-c"]
-	path = json-c
-	url = https://github.com/json-c/json-c
