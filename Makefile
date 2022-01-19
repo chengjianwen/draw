@@ -10,13 +10,15 @@ LIB      = $(WSDIR)/libws.a
 LIB     += `pkg-config --libs libmypaint-2.0`
 LIB     += -lm
 
+DISABLE_VERBOSE = no
+
 # Check if verbose examples
 ifeq ($(VERBOSE_EXAMPLES), no)
 	CFLAGS += -DDISABLE_VERBOSE
 endif
 
-draw.ws: draw.c
-	$(CC) $(CFLAGS) $(LDFLAGS) draw.c -o draw.ws $(LIB)
+draw.ws: draw.c fifo.c
+	$(CC) $(CFLAGS) $(LDFLAGS) draw.c fifo.c -o draw.ws $(LIB)
 
 install:
 	install draw.ws /usr/local/bin/
