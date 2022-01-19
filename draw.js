@@ -41,7 +41,15 @@ function draw() {
   canvas.height = document.body.clientHeight - 10;
   area.appendChild(canvas);
 
-  var ws = new WebSocket('ws://'+location.host+'/draw.ws');
+  var url;
+  if (location.protocol == 'http')
+    url = 'ws';
+  else if (location.protocol == 'https')
+    url = 'wss';
+  url += '://';
+  url += location.host;
+  url += '/draw.ws';
+  var ws = new WebSocket(url);
   ws.onopen = function() {
     console.log('CONNECT\n'); 
     setInterval(() => {
