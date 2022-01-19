@@ -118,7 +118,6 @@ void onmessage(int fd, const unsigned char *msg, uint64_t size, int type)
      */
     json_object *obj = json_tokener_parse((char *)msg);
     int width, height;
-    struct array_list *motions;
 
     json_object *obj_tmp;
     json_object_object_get_ex(obj, "width", &obj_tmp);
@@ -126,29 +125,29 @@ void onmessage(int fd, const unsigned char *msg, uint64_t size, int type)
     json_object_object_get_ex(obj, "height", &obj_tmp);
     height = json_object_get_int(obj_tmp);
     json_object_object_get_ex(obj, "stroke", &obj_tmp);
-    motions = json_object_get_array (obj_tmp);
     MyPaintSurface *surface = (MyPaintSurface *) mypaint_fixed_tiled_surface_new(width, height);
     MyPaintTiledSurface *tiled_surface = (MyPaintTiledSurface *)surface;
     mypaint_brush_reset (brush);
     mypaint_brush_new_stroke (brush);
     mypaint_surface_begin_atomic (surface);
-    for (int i = 0; i <  array_list_length(motions); i++)
+    for (int i = 0; i <  json_object_array_length(obj_tmp); i++)
     {
-        json_object *motion = (json_object *)array_list_get_idx(motions, i);
+        json_object *obj_tmp_tmp = json_object_array_get_idx(obj_tmp, i);
+        json_object *obj_tmp_tmp_tmp;
         float x, y, pressure, xtilt, ytilt, dtime, viewzoom, viewrotation, barrel_rotation;
 	int linear;
-        json_object_object_get_ex(motion, "x", &obj_tmp);
-        x = json_object_get_double(obj_tmp);
-        json_object_object_get_ex(motion, "y", &obj_tmp);
-        y = json_object_get_double(obj_tmp);
-        json_object_object_get_ex(motion, "pressure", &obj_tmp);
-        pressure = json_object_get_double(obj_tmp);
-        json_object_object_get_ex(motion, "xtilt", &obj_tmp);
-        xtilt = json_object_get_double(obj_tmp);
-        json_object_object_get_ex(motion, "ytilt", &obj_tmp);
-        ytilt = json_object_get_double(obj_tmp);
-        json_object_object_get_ex(motion, "dtime", &obj_tmp);
-        dtime = (float)json_object_get_double(obj_tmp) / 1000;
+        json_object_object_get_ex(obj_tmp_tmp, "x", &obj_tmp_tmp_tmp);
+        x = json_object_get_double(obj_tmp_tmp_tmp);
+        json_object_object_get_ex(obj_tmp_tmp, "y", &obj_tmp_tmp_tmp);
+        y = json_object_get_double(obj_tmp_tmp_tmp);
+        json_object_object_get_ex(obj_tmp_tmp, "pressure", &obj_tmp_tmp_tmp);
+        pressure = json_object_get_double(obj_tmp_tmp_tmp);
+        json_object_object_get_ex(obj_tmp_tmp, "xtilt", &obj_tmp_tmp_tmp);
+        xtilt = json_object_get_double(obj_tmp_tmp_tmp);
+        json_object_object_get_ex(obj_tmp_tmp, "ytilt", &obj_tmp_tmp_tmp);
+        ytilt = json_object_get_double(obj_tmp_tmp_tmp);
+        json_object_object_get_ex(obj_tmp_tmp, "dtime", &obj_tmp_tmp_tmp);
+        dtime = (float)json_object_get_double(obj_tmp_tmp_tmp) / 1000;
 	viewzoom = 1.0;
 	viewrotation = 0;
 	barrel_rotation = 0;
@@ -166,16 +165,16 @@ void onmessage(int fd, const unsigned char *msg, uint64_t size, int type)
 				 barrel_rotation,
 				 linear);
     }
+
     MyPaintRectangle roi;
     MyPaintRectangles rois;
     rois.num_rectangles = 1;
     rois.rectangles = &roi;
     mypaint_surface_end_atomic(surface, &rois);
-
-    json_object *out = json_object_new_array();
     if (roi.width
     && roi.height)
     {
+        json_object *out = json_object_new_array();
         int tile_size_pixels = MYPAINT_TILE_SIZE;
         int tiles_height = ceil((float)height / tile_size_pixels);
         int tiles_width = ceil((float)width / tile_size_pixels);
@@ -219,11 +218,12 @@ void onmessage(int fd, const unsigned char *msg, uint64_t size, int type)
                 mypaint_tiled_surface_tile_request_end(tiled_surface, &request);
             }
         }
+        const char *p = json_object_to_json_string_ext (out, JSON_C_TO_STRING_PLAIN);
+        ws_sendframe(fd, (const char *)p, strlen(p), true, type);
+        json_object_put(out);
     }
-    mypaint_tiled_surface_destroy (tiled_surface);
-
-    const char *p = json_object_to_json_string_ext (out, JSON_C_TO_STRING_PLAIN);
-    ws_sendframe(fd, p, strlen(p), true, type);
+    mypaint_surface_unref(surface);
+    json_object_put(obj);
 }
 
 /**
@@ -254,7 +254,7 @@ int main(void)
     evs.onclose   = &onclose;
     evs.onmessage = &onmessage;
     if (fork() == 0)
-        ws_socket(&evs, 8080, 0); /* Never returns. */
+      ws_socket(&evs, 8080, 0); /* Never returns. */
 
     return (0);
 }
