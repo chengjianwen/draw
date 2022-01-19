@@ -135,7 +135,8 @@ void onmessage(int fd, const unsigned char *msg, uint64_t size, int type)
     for (int i = 0; i <  array_list_length(motions); i++)
     {
         json_object *motion = (json_object *)array_list_get_idx(motions, i);
-        float x, y, pressure, xtilt, ytilt, dtime;
+        float x, y, pressure, xtilt, ytilt, dtime, viewzoom, viewrotation, barrel_rotation;
+	int linear;
         json_object_object_get_ex(motion, "x", &obj_tmp);
         x = json_object_get_double(obj_tmp);
         json_object_object_get_ex(motion, "y", &obj_tmp);
@@ -148,6 +149,10 @@ void onmessage(int fd, const unsigned char *msg, uint64_t size, int type)
         ytilt = json_object_get_double(obj_tmp);
         json_object_object_get_ex(motion, "dtime", &obj_tmp);
         dtime = (float)json_object_get_double(obj_tmp) / 1000;
+	viewzoom = 1.0;
+	viewrotation = 0;
+	barrel_rotation = 0;
+	linear = 0;
         mypaint_brush_stroke_to (brush,
                                  surface,
                                  x,
@@ -155,10 +160,17 @@ void onmessage(int fd, const unsigned char *msg, uint64_t size, int type)
                                  pressure,
                                  xtilt,
                                  ytilt,
-                                 dtime);
+                                 dtime,
+				 viewzoom,
+				 viewrotation,
+				 barrel_rotation,
+				 linear);
     }
     MyPaintRectangle roi;
-    mypaint_surface_end_atomic(surface, &roi);
+    MyPaintRectangles rois;
+    rois.num_rectangles = 1;
+    rois.rectangles = &roi;
+    mypaint_surface_end_atomic(surface, &rois);
 
     json_object *out = json_object_new_array();
     if (roi.width

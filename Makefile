@@ -5,9 +5,9 @@ WSDIR    = wsServer
 INCLUDE  = -I $(WSDIR)/include
 CFLAGS   = -Wall -Wextra -O2
 CFLAGS  += $(INCLUDE) -std=c99 -pthread -pedantic
-CFLAGS  += `pkg-config --cflags libmypaint json-c`
+CFLAGS  += `pkg-config --cflags libmypaint-2.0`
 LIB      = $(WSDIR)/libws.a
-LIB     += `pkg-config --libs libmypaint json-c`
+LIB     += `pkg-config --libs libmypaint-2.0`
 LIB     += -lm
 
 # Check if verbose examples
@@ -22,10 +22,10 @@ install:
 	install draw.ws /usr/local/bin/
 	install draw.service /lib/systemd/system/
 	systemctl enable draw
-	systemctl start draw
+	systemctl draw reload
 	install 10-proxy-draw.conf /etc/lighttpd/conf-available/
 	lighttpd-enable-mod proxy-draw
-	systemctl restart lighttpd
+	service lighttpd force-reload
 
 clean:
 	rm -f draw.ws
