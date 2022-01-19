@@ -174,7 +174,10 @@ void onmessage(int fd, const unsigned char *msg, uint64_t size, int type)
     if (roi.width
     && roi.height)
     {
-        json_object *out = json_object_new_array();
+        json_object *out = json_object_new_object();
+        json_object_object_add (out, "width", json_object_new_int(width));
+        json_object_object_add (out, "height", json_object_new_int(height));
+        json_object *stroke = json_object_new_array();
         int tile_size_pixels = MYPAINT_TILE_SIZE;
         int tiles_height = ceil((float)height / tile_size_pixels);
         int tiles_width = ceil((float)width / tile_size_pixels);
@@ -211,13 +214,14 @@ void onmessage(int fd, const unsigned char *msg, uint64_t size, int type)
                             json_object_array_add (pixel, json_object_new_int(r));
                             json_object_array_add (pixel, json_object_new_int(g));
                             json_object_array_add (pixel, json_object_new_int(b));
-                            json_object_array_add (out, pixel);
+                            json_object_array_add (stroke, pixel);
                         }
                     }
                 }
                 mypaint_tiled_surface_tile_request_end(tiled_surface, &request);
             }
         }
+        json_object_object_add (out, "stroke", stroke);
         const char *p = json_object_to_json_string_ext (out, JSON_C_TO_STRING_PLAIN);
         ws_sendframe(fd, (const char *)p, strlen(p), true, type);
         json_object_put(out);

@@ -66,11 +66,18 @@ function draw() {
     else if (event.data.length == 1
     && event.data == String.fromCharCode(0xa))
       console.log ('PONG\n');
-    else
-      JSON.parse (event.data).forEach(item => {
+    else {
+      var obj = JSON.parse (event.data);
+      obj.stroke.forEach(item => {
         ctx.strokeStyle = 'rgb(' + item[2] / 256 + ',' + item[3] / 256 + ',' + item[4] / 256 + ')';
-        ctx.strokeRect(item[0], item[1], 1, 1);
+        console.log('width: ' + ctx.canvas.width);
+        console.log('height: ' + ctx.canvas.height);
+        console.log('origin width: ' + obj.width);
+        console.log('origin height: ' + obj.height);
+        var radio = obj.width / ctx.canvas.width > obj.height / ctx.canvas.height ? obj.width / ctx.canvas.width :  obj.height / ctx.canvas.height;
+        ctx.strokeRect(item[0] / radio, item[1] / radio, 1, 1);
       });
+    }
   };
 
   canvas.onpointerdown = e => {
