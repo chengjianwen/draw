@@ -9,14 +9,17 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <getopt.h>
 #include <unistd.h>
 #include <string.h>
 #include <mypaint-brush.h>
 #include <mypaint-fixed-tiled-surface.h>
 #include <json-c/json.h>
 #include <math.h>
+#include <sys/time.h>
 #include <ws.h>
 
+#define DISABLE_VERBOSE 1
 #define BRUSH_FILE "/usr/share/mypaint/brushes/classic/kabura.myb"
 //#define BRUSH_FILE "/usr/share/mypaint-data/1.0/brushes/classic/kabura.myb"
 /*
@@ -82,6 +85,9 @@ void onclose(int fd)
  */
 void onmessage(int fd, const unsigned char *msg, uint64_t size, int type)
 {
+    struct timeval tv1, tv2, tv3;
+    static int count = 0;
+    gettimeofday(&tv1, NULL);
     char *cli;
     cli = ws_getaddress(fd);
 #ifndef DISABLE_VERBOSE
@@ -169,6 +175,7 @@ void onmessage(int fd, const unsigned char *msg, uint64_t size, int type)
 				 barrel_rotation,
 				 linear);
     }
+    gettimeofday(&tv2, NULL);
 
     MyPaintRectangle roi;
     MyPaintRectangles rois;
@@ -232,6 +239,12 @@ void onmessage(int fd, const unsigned char *msg, uint64_t size, int type)
     }
     mypaint_surface_unref(surface);
     json_object_put(obj);
+    gettimeofday(&tv3, NULL);
+    printf ("waste time: %ld, %ld  micro seconds on %dth stroke, pid: %d.\n",
+            1000000 * (tv3.tv_sec - tv2.tv_sec) + tv3.tv_usec - tv2.tv_usec,
+            1000000 * (tv2.tv_sec - tv1.tv_sec) + tv2.tv_usec - tv1.tv_usec,
+	    count++,
+	    getpid());
 }
 
 /**
@@ -240,8 +253,21 @@ void onmessage(int fd, const unsigned char *msg, uint64_t size, int type)
  * @note After invoking @ref ws_socket, this routine never returns,
  * unless if invoked from a different thread.
  */
-int main(void)
+int main(int argc, char *argv[])
 {
+    int   c;
+    int   port = 8080;
+    while ((c = getopt(argc, argv, "p:")) != -1)
+    {
+        switch (c)
+	{
+            case 'p':
+                port = atoi(optarg);
+                break;
+            default:
+                break;
+	}
+    }
     /*
         Initialize the brush
     */
@@ -262,7 +288,7 @@ int main(void)
     evs.onclose   = &onclose;
     evs.onmessage = &onmessage;
     if (fork() == 0)
-      ws_socket(&evs, 8080, 0); /* Never returns. */
+      ws_socket(&evs, port, 0); /* Never returns. */
 
     return (0);
 }
