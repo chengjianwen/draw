@@ -17,8 +17,8 @@ ifeq ($(VERBOSE_EXAMPLES), no)
 	CFLAGS += -DDISABLE_VERBOSE
 endif
 
-draw.ws: draw.c fifo.c
-	$(CC) $(CFLAGS) $(LDFLAGS) draw.c fifo.c -o draw.ws $(LIB)
+draw.ws: draw.c
+	$(CC) $(CFLAGS) $(LDFLAGS) draw.c -o draw.ws $(LIB)
 
 install:
 	install draw.ws /usr/local/bin/
