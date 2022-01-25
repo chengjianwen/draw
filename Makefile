@@ -23,8 +23,9 @@ draw.ws: draw.c
 install:
 	install draw.ws /usr/local/bin/
 	install draw.service /lib/systemd/system/
-	systemctl enable draw
-	systemctl draw reload
+	install draw /etc/init.d/
+	systemctl enable draw && systemctl draw reload
+	service draw start
 	install 10-proxy-draw.conf /etc/lighttpd/conf-available/
 	lighttpd-enable-mod proxy-draw
 	service lighttpd force-reload

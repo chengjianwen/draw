@@ -1,0 +1,28 @@
+#!/bin/bash
+
+case "$1" in 
+start)
+   /usr/local/bin/draw.ws &
+   echo $!>/var/run/draw.pid
+   ;;
+stop)
+   kill `cat /var/run/draw.pid`
+   rm /var/run/draw.pid
+   ;;
+restart)
+   $0 stop
+   $0 start
+   ;;
+status)
+   if [ -e /var/run/draw.pid ]; then
+      echo draw.ws is running, pid=`cat /var/run/draw.pid`
+   else
+      echo draw.ws is NOT running
+      exit 1
+   fi
+   ;;
+*)
+   echo "Usage: $0 {start|stop|status|restart}"
+esac
+
+exit 0 

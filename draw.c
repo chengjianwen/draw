@@ -20,8 +20,6 @@
 #include <ws.h>
 
 #define DISABLE_VERBOSE 1
-#define BRUSH_FILE "/usr/share/mypaint/brushes/classic/kabura.myb"
-//#define BRUSH_FILE "/usr/share/mypaint-data/1.0/brushes/classic/kabura.myb"
 /*
  * global variable
  */
@@ -160,8 +158,8 @@ void onmessage(int fd, const unsigned char *msg, uint64_t size, int type)
         {
           MyPaintSurface *surface = (MyPaintSurface *) mypaint_fixed_tiled_surface_new(width, height);
           MyPaintTiledSurface *tiled_surface = (MyPaintTiledSurface *)surface;
-          mypaint_brush_reset (brush);
           mypaint_brush_new_stroke (brush);
+          mypaint_brush_reset (brush);
           mypaint_surface_begin_atomic (surface);
           for (unsigned long i = 0;
                i <  json_object_array_length(obj_tmp);
@@ -345,42 +343,19 @@ int main(int argc, char *argv[])
     Initialize the brush
   */
   brush = mypaint_brush_new();
-/*
-  FILE *fp;
-  fp = fopen (BRUSH_FILE,
-              "r");
-  fseek (fp,
-         0,
-         SEEK_END);
-  int size;
-  char *buf;
-  size = ftell (fp);
-  buf = (char *)malloc (size);
-
-  rewind (fp);
-  fread (buf, 1, size, fp);
-  fclose (fp);
-*/
   mypaint_brush_from_defaults(brush);
-//  free (buf);
 
   /*
     WebSocket
   */
   struct ws_events *evs;
 
-  /*
-    后台运行
-  */
-  if (fork() == 0)
-  {
-    evs = (struct ws_events *)malloc (sizeof (struct ws_events));
-    evs->onopen    = &onopen;
-    evs->onclose   = &onclose;
-    evs->onmessage = &onmessage;
-    ws_socket(evs, port, 0);
-    free (evs);
-  }
+  evs = (struct ws_events *)malloc (sizeof (struct ws_events));
+  evs->onopen    = &onopen;
+  evs->onclose   = &onclose;
+  evs->onmessage = &onmessage;
+  ws_socket(evs, port, 0);
+  free (evs);
 
   return (0);
 }
