@@ -27,9 +27,9 @@ function draw() {
 
   // 每间隔45秒，发送一个ping，以保持连接不被服务器关闭
   ws.onopen = function() {
-    record.disable = 'false';
-    brush.disable = 'false';
-    clear.disable = 'false';
+    record.disabled = '';
+    brush.disabled = '';
+    clear.disabled = '';
     var msg = {
       action: 'ping'
     };
@@ -41,9 +41,9 @@ function draw() {
 
   ws.onclose = function() {
     clearInterval (alive_id);
-    record.disable = 'true';
-    brush.disable = 'true';
-    clear.disable = 'true';
+    record.disabled = 'true';
+    brush.disabled = 'true';
+    clear.disabled = 'true';
   };
 
   ws.onerror = function() {
@@ -199,10 +199,10 @@ function draw() {
           img.src = '/brushes/' + brushes[i];
           img.style.width = '25%';
           img.onclick = function(e) {
+            record.disabled = '';
+            brush.disabled = '';
+            clear.disabled = '';
             available.remove();
-            record.disable = 'false';
-            brush.disable = 'false';
-            clear.disable = 'false';
             xhttp.onreadystatechange = function() {
               if (this.readyState == 4 && this.status == 200) {
                 var msg = {

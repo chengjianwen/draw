@@ -161,7 +161,7 @@ void onmessage(int fd, const unsigned char *msg, uint64_t size, int type)
           mypaint_brush_new_stroke (brush);
           mypaint_brush_reset (brush);
           mypaint_surface_begin_atomic (surface);
-          for (unsigned long i = 0;
+          for (size_t i = 0;
                i <  json_object_array_length(obj_tmp);
                i++)
           {
