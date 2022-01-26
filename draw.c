@@ -12,6 +12,7 @@
 #include <getopt.h>
 #include <unistd.h>
 #include <string.h>
+#include <signal.h>
 #include <mypaint-brush.h>
 #include <mypaint-fixed-tiled-surface.h>
 #include <json-c/json.h>
@@ -20,30 +21,13 @@
 #include <ws.h>
 
 #define DISABLE_VERBOSE 1
-/*
- * global variable
- */
+
 MyPaintBrush *brush;
 
-/**
- * @dir example/
- * @brief wsServer examples folder
- *
- * @file send_receive.c
- * @brief Simple send/receiver example.
- */
-
-/**
- * @brief Called when a client connects to the server.
- *
- * @param fd File Descriptor belonging to the client. The @p fd parameter
- * is used in order to send messages and retrieve informations
- * about the client.
- */
 void onopen(int fd)
 {
     char *cli;
-    cli = ws_getaddress(fd);
+        cli = ws_getaddress(fd);
 #ifndef DISABLE_VERBOSE
     printf("Connection opened, client: %d | addr: %s\n", fd, cli);
 #endif
@@ -85,23 +69,21 @@ void onmessage(int fd, const unsigned char *msg, uint64_t size, int type)
 {
   char *cli;
   cli = ws_getaddress(fd);
-#ifndef DISABLE_VERBOSE
-  printf("I receive a message: %s (size: %" PRId64 ", type: %d), from: %s/%d\n",
-      msg, size, type, cli, fd);
-#endif
-  free(cli);
 
   if (!size)
   {
 #ifndef DISABLE_VERBOSE
     printf("I receive a empty message.\n");
 #endif
-    return;
   }
 
   switch (type)
   {
     case WS_FR_OP_TXT:
+#ifndef DISABLE_VERBOSE
+      printf("I receive a message: %s (size: %" PRId64 "), from: %s/%d\n",
+      msg, size, cli, fd);
+#endif
       ;
       json_object *obj;
       obj = json_tokener_parse((char *)msg);
@@ -122,7 +104,7 @@ void onmessage(int fd, const unsigned char *msg, uint64_t size, int type)
         ws_sendframe(fd,
                      json_object_to_json_string(obj_tmp),
                      strlen(json_object_to_json_string(obj_tmp)),
-                     true,
+                     2,
                      type);
         json_object_put(obj_tmp);
       }
@@ -131,7 +113,7 @@ void onmessage(int fd, const unsigned char *msg, uint64_t size, int type)
         ws_sendframe(fd,
                      json_object_to_json_string(obj),
                      strlen(json_object_to_json_string(obj)),
-                     true,
+                     1,
                      type);
       }
       else if (strcmp(action, "brush") == 0)
@@ -303,7 +285,7 @@ void onmessage(int fd, const unsigned char *msg, uint64_t size, int type)
             ws_sendframe(fd,
                          (const char *)p,
                          strlen(p),
-                         true,
+                         2,
                          type);
             json_object_put(out);
           }
@@ -313,15 +295,26 @@ void onmessage(int fd, const unsigned char *msg, uint64_t size, int type)
       json_object_put(obj);
       break;
     case WS_FR_OP_BIN:
+#ifndef DISABLE_VERBOSE
+      printf("I receive a binary message: (size: %" PRId64 "), from: %s/%d\n",
+      size, cli, fd);
+#endif
       ws_sendframe(fd, 
                    (const char *)msg,
                    size,
-                   true,
+                   1,
                    type);
       break;
     default:
       break;
   }
+  free (cli);
+
+}
+
+static void terminate(int signum)
+{
+    exit(0);
 }
 
 int main(int argc, char *argv[])
@@ -354,6 +347,11 @@ int main(int argc, char *argv[])
   evs->onopen    = &onopen;
   evs->onclose   = &onclose;
   evs->onmessage = &onmessage;
+
+  signal(SIGINT, SIG_IGN);
+  signal(SIGTERM, SIG_IGN);
+  signal(SIGKILL, terminate);
+
   ws_socket(evs, port, 0);
   free (evs);
 

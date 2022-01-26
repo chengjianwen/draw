@@ -6,7 +6,7 @@ start)
    echo $!>/var/run/draw.pid
    ;;
 stop)
-   kill `cat /var/run/draw.pid`
+   kill -s ABRT `cat /var/run/draw.pid`
    rm /var/run/draw.pid
    ;;
 restart)

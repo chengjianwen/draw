@@ -6,6 +6,9 @@ function draw() {
 
   var ws;
   var context;
+  var recorder;
+  var processor;
+  var player;
   var canvas;
   var timer_id;
   var alive_id;
@@ -52,13 +55,13 @@ function draw() {
   ws.onmessage = function(event) {
     if (event.data instanceof ArrayBuffer)
     {
-      var float32 = new Float32Array(event.data);
-      var buffer = context.createBuffer(1, float32.length, context.sampleRate);
-      for (var i = 0; i < float32.length; i++)
+      var int8 = new Int8Array(event.data);
+      var buffer = context.createBuffer(1, int8.length, context.sampleRate);
+      for (var i = 0; i < int8.length; i++)
       {
-        buffer.getChannelData(0)[i] = float32[i];
+        buffer.getChannelData(0)[i] = int8[i] / 127;
       }
-      var player = context.createBufferSource();
+      player = context.createBufferSource();
       player.connect(context.destination);
       player.buffer = buffer;
       player.start();
@@ -109,21 +112,26 @@ function draw() {
   record.onclick = start;
   sticky.appendChild(record);
 
+  navigator.mediaDevices.getUserMedia({
+    audio: true
+  }).then (function(stream) {
+    // 音频资源，以及音频处理器
+    context = new AudioContext();
+    recorder = context.createMediaStreamSource(stream);
+    processor = context.createScriptProcessor(4096, 1, 1);
+  });
   function start(e) {
     record.innerHTML = "00";
-    navigator.mediaDevices.getUserMedia({
-      audio: true
-    }).then (function(stream) {
-      // 音频资源，以及音频处理器
-      context = new AudioContext();
-      var recorder = context.createMediaStreamSource(stream);
-      var processor = context.createScriptProcessor(4096, 1, 1);
-      recorder.connect(processor);
-      processor.connect(context.destination);
-      processor.onaudioprocess = function(e) {
-        ws.send(e.inputBuffer.getChannelData(0));
-      }
-    });
+    recorder.connect(processor);
+    processor.connect(context.destination);
+    processor.onaudioprocess = function(e) {
+      var audio = e.inputBuffer.getChannelData(0);
+      var float32 = new Float32Array(audio);
+      var int8 = new Int8Array(float32.length);
+      for (var i = 0; i < int8.length; i++)
+        int8[i] = float32[i] * 127;
+      ws.send(int8.buffer);
+    }
     timer_id = setInterval(() => {
       var v = record.innerHTML.split(':');
       v[v.length - 1] = parseInt(v[v.length - 1]) + 1;
@@ -154,9 +162,10 @@ function draw() {
 
   // 结束录音
   function stop(e) {
+    recorder.disconnect();
+    processor.disconnect();
     clearInterval (timer_id);
     record.innerHTML = "●";
-    context.close();
     record.onclick = start;
   }
 
