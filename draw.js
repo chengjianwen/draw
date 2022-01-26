@@ -116,9 +116,9 @@ function draw() {
     audio: true
   }).then (function(stream) {
     // 音频资源，以及音频处理器
-    context = new AudioContext();
+    context = new (window.AudioContext || window.webkitAudioContext)();
     recorder = context.createMediaStreamSource(stream);
-    processor = context.createScriptProcessor(4096, 1, 1);
+    processor = context.createScriptProcessor(8192, 1, 1);
   });
   function start(e) {
     record.innerHTML = "00";
