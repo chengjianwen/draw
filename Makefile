@@ -3,9 +3,10 @@ all: draw.ws
 CC       = gcc
 WSDIR    = wsServer
 INCLUDE  = -I $(WSDIR)/include
-CFLAGS   = -Wall -Wextra -O2
+CFLAGS   = -Wall
 CFLAGS  += $(INCLUDE) -std=c99 -pthread -pedantic
 CFLAGS  += `pkg-config --cflags libmypaint-2.0`
+CFLAGS  += -g
 LIB      = $(WSDIR)/libws.a
 LIB     += `pkg-config --libs libmypaint-2.0`
 LIB     += -lm

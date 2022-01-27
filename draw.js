@@ -3,20 +3,22 @@
   一个基于WebSocket的协作白板，支持音频
 */
 function draw() {
-
   var ws;
   var context;
   var recorder;
-  var processor;
+  var script;
   var player;
+  var osc;
   var canvas;
-  var timer_id;
+  var timer;
   var alive_id;
   var stroke;
   var sticky;
   var record;
   var brush;
   var clear;
+  var user;
+  var test;
 
   let wsurl;
   if (location.protocol == 'http:')
@@ -33,6 +35,7 @@ function draw() {
     record.disabled = '';
     brush.disabled = '';
     clear.disabled = '';
+    user.disabled = '';
     var msg = {
       action: 'ping'
     };
@@ -47,6 +50,7 @@ function draw() {
     record.disabled = 'true';
     brush.disabled = 'true';
     clear.disabled = 'true';
+    user.disabled = 'true';
   };
 
   ws.onerror = function() {
@@ -103,78 +107,12 @@ function draw() {
   sticky.style.left = '0';
   sticky.style.top = '0';
 
-  // 开始/停止按钮，用户按下后，输入的笔迹和声音将被发送到WebSocket服务器
-  record = document.createElement("button");
-  record.innerHTML = "●";
-  record.style.padding = '5px';
-  record.style.margin = '5px';
-  record.style.fontSize = 'x-large';
-  record.onclick = start;
-  sticky.appendChild(record);
-
-  navigator.mediaDevices.getUserMedia({
-    audio: true
-  }).then (function(stream) {
-    // 音频资源，以及音频处理器
-    context = new (window.AudioContext || window.webkitAudioContext)();
-    recorder = context.createMediaStreamSource(stream);
-    processor = context.createScriptProcessor(8192, 1, 1);
-  });
-  function start(e) {
-    record.innerHTML = "00";
-    recorder.connect(processor);
-    processor.connect(context.destination);
-    processor.onaudioprocess = function(e) {
-      var audio = e.inputBuffer.getChannelData(0);
-      var float32 = new Float32Array(audio);
-      var int8 = new Int8Array(float32.length);
-      for (var i = 0; i < int8.length; i++)
-        int8[i] = float32[i] * 127;
-      ws.send(int8.buffer);
-    }
-    timer_id = setInterval(() => {
-      var v = record.innerHTML.split(':');
-      v[v.length - 1] = parseInt(v[v.length - 1]) + 1;
-      if (v[v.length - 1] > 59)
-      {
-        v[v.length - 1] = '00';
-        if (v.length < 2)
-          v.unshift('00');
-        v[v.length - 2] = parseInt(v[v.length - 2]) + 1;
-        if (v[v.length - 2] > 59)
-        {
-          v[v.length - 2] = '00';
-          if (v.length < 3)
-            v.unshift('00');
-          v[v.length - 3] = parseInt(v[v.length - 3]) + 1;
-        }
-      }
-      for (var i = 0; i < v.length; i++)
-      {
-        v[i] = v[i].toString();
-        if (v[i].length == 1)
-          v[i] = '0' + v[i];
-      }
-      record.innerHTML = v.join(':');
-    }, 1000);
-    record.onclick = stop;
-  };
-
-  // 结束录音
-  function stop(e) {
-    recorder.disconnect();
-    processor.disconnect();
-    clearInterval (timer_id);
-    record.innerHTML = "●";
-    record.onclick = start;
-  }
-
   // 画笔选择，用户按下后，弹出选择画笔的显示区域
   brush = document.createElement("button");
-  brush.innerHTML = "🖌️";
+  brush.innerHTML = "🖍";
+//	 🖊 🖋 🖌 🖍
   brush.style.padding = '5px';
   brush.style.margin = '5px';
-  brush.style.fontSize = 'x-large';
   brush.onclick = function() {
     // 画笔选择区域，显示可用的画笔
     var available = document.createElement("div");
@@ -211,6 +149,7 @@ function draw() {
             record.disabled = '';
             brush.disabled = '';
             clear.disabled = '';
+            user.disabled = '';
             available.remove();
             xhttp.onreadystatechange = function() {
               if (this.readyState == 4 && this.status == 200) {
@@ -235,6 +174,7 @@ function draw() {
     record.disabled = 'true';
     brush.disabled = 'true';
     clear.disabled = 'true';
+    user.disabled = 'true';
   }
   sticky.appendChild(brush);
 
@@ -243,7 +183,6 @@ function draw() {
   clear.innerHTML = "⎚";
   clear.style.padding = '5px';
   clear.style.margin = '5px';
-  clear.style.fontSize = 'x-large';
   clear.onclick = function() {
     canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
     if (ws.readyState == WebSocket.OPEN)
@@ -255,6 +194,152 @@ function draw() {
     }
   }
   sticky.appendChild(clear);
+
+  // 开始/停止按钮，用户按下后，输入的笔迹和声音将被发送到WebSocket服务器
+  record = document.createElement("button");
+  record.innerHTML = "🔇";
+  record.style.padding = '5px';
+  record.style.margin = '5px';
+  record.onclick = start;
+  sticky.appendChild(record);
+
+  navigator.mediaDevices.getUserMedia({
+    audio: true
+  }).then (function(stream) {
+    // 音频资源，以及音频处理器
+    context = new (window.AudioContext || window.webkitAudioContext)({
+      sampleRate: 16000
+    });
+    console.log(context);
+    recorder = context.createMediaStreamSource(stream);
+    script = context.createScriptProcessor(8192, 1, 1);
+    script.onaudioprocess = function(e) {
+      var audio = e.inputBuffer.getChannelData(0);
+      var float32 = new Float32Array(audio);
+      var int8 = new Int8Array(float32.length);
+      for (var i = 0; i < int8.length; i++)
+        int8[i] = float32[i] * 127;
+      ws.send(int8.buffer);
+    }
+    osc = context.createOscillator();
+    osc.type = 'sine';
+    osc.start();
+  });
+  function start(e) {
+    record.innerHTML = "🔊";
+    recorder.connect(script);
+    script.connect(context.destination);
+    record.onclick = stop;
+  };
+
+  // 结束录音
+  function stop(e) {
+    recorder.disconnect();
+    script.disconnect();
+    record.innerHTML = "🔇";
+    record.onclick = start;
+  }
+
+  // 测试
+  test = document.createElement("button");
+  test.innerHTML = "start";
+  test.style.padding = '5px';
+  test.style.margin = '5px';
+  test.onclick = starttest;
+  sticky.appendChild(test);
+
+  function starttest(e) {
+    test.innerHTML = "stop";
+    osc.connect(context.destination);
+    test.onclick = stoptest;
+  };
+
+  function stoptest(e) {
+    test.innerHTML = "start";
+    osc.disconnect();
+    test.onclick = starttest;
+  };
+
+  user = document.createElement("button");
+  user.innerHTML = "🧍";
+  user.style.padding = '5px';
+  user.style.margin = '5px';
+  user.onclick = function() {
+    // 显示在线用户
+    var users = document.createElement("div");
+    users.style.position = 'absolute';
+    users.style.overflow = 'auto';
+    users.style.width = '80%';
+    users.style.height = '80%';
+    users.style.top = '10%';
+    users.style.left = '10%';
+    users.style.border = '1px rgba(0, 252, 255, 0.7) solid';
+    users.style.color = '#ffffff';
+    users.style.background = 'rgb(6, 8, 12)';
+    users.onclick = function() {
+      record.disabled = '';
+      brush.disabled = '';
+      clear.disabled = '';
+      user.disabled = '';
+      users.remove();
+    }
+
+    var xhttp = new XMLHttpRequest();
+    xhttp.onreadystatechange = function() {
+      if (this.readyState == 4 && this.status == 200) {
+        var u = JSON.parse(xhttp.response);
+        for (var i = 0; i < u.length; i++)
+        {
+          var div = document.createElement("div");
+          div.innerHTML = u[i].ip;
+          div.style.width = '100%';
+          users.appendChild(div);
+        }
+      }
+    };
+    xhttp.open("GET", '/users/users.json', true);
+    xhttp.send();
+
+    document.body.insertBefore(users, undefined);
+    record.disabled = 'true';
+    brush.disabled = 'true';
+    clear.disabled = 'true';
+    user.disabled = 'true';
+  }
+  sticky.appendChild(user);
+
+  timer = document.createElement("button");
+  timer.innerHTML = "0";
+  timer.style.padding = '5px';
+  timer.style.margin = '5px';
+  timer.style.position = 'absolute';
+  timer.style.right= '0';
+  timer.style.top = '0';
+  setInterval(() => {
+    var v = timer.innerHTML.split(':');
+    v[v.length - 1] = parseInt(v[v.length - 1]) + 1;
+    if (v[v.length - 1] > 59)
+    {
+      v[v.length - 1] = '0';
+      if (v.length < 2)
+        v.unshift('0');
+      v[v.length - 2] = parseInt(v[v.length - 2]) + 1;
+      if (v[v.length - 2] > 59)
+      {
+        v[v.length - 2] = '0';
+        if (v.length < 3)
+          v.unshift('0');
+        v[v.length - 3] = parseInt(v[v.length - 3]) + 1;
+      }
+    }
+    for (var i = 0; i < v.length; i++)
+    {
+      v[i] = v[i].toString();
+      if (v[i].length == 1)
+        v[i] = '0' + v[i];
+    }
+    timer.innerHTML = v.join(':');
+  }, 1000);
 
   // 绘制区
   canvas = document.createElement("canvas");
@@ -297,6 +382,7 @@ function draw() {
     canvas.onpointermove = null;
   }
 
-  document.body.insertBefore(sticky, undefined);
+  document.body.insertBefore(timer, undefined);
+  document.body.insertBefore(sticky, timer);
   document.body.insertBefore(canvas, sticky);
 }

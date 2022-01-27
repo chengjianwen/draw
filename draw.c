@@ -17,12 +17,23 @@
 #include <mypaint-fixed-tiled-surface.h>
 #include <json-c/json.h>
 #include <math.h>
-#include <sys/time.h>
+#include <time.h>
 #include <ws.h>
 
 #define DISABLE_VERBOSE 1
 
 MyPaintBrush *brush;
+json_object  *users;
+
+static void dump()
+{
+  FILE *fp = fopen ("/var/run/users/users.json", "w");
+  if (fp)
+  {
+    fputs(json_object_to_json_string(users), fp);
+    fclose (fp);
+  }
+}
 
 void onopen(int fd)
 {
@@ -31,6 +42,17 @@ void onopen(int fd)
 #ifndef DISABLE_VERBOSE
     printf("Connection opened, client: %d | addr: %s\n", fd, cli);
 #endif
+    json_object *obj;
+    obj = json_object_new_object();
+    json_object_object_add (obj,
+                            "ip",
+                             json_object_new_string(cli));
+    json_object_object_add (obj,
+                            "time",
+                             json_object_new_int64(time(NULL)));
+    json_object_array_add (users,
+                           obj);
+    dump();
     free(cli);
 }
 
@@ -48,7 +70,25 @@ void onclose(int fd)
 #ifndef DISABLE_VERBOSE
     printf("Connection closed, client: %d | addr: %s\n", fd, cli);
 #endif
+    json_object *new_users, *obj;
+    new_users = json_object_new_array();
+    char *ip;
+    for (int i = 0;
+         i < json_object_array_length(users);
+         i++)
+    {
+      obj = json_object_array_get_idx(users, i);
+      ip = json_object_get_string(json_object_object_get(obj, "ip"));
+      if (strcmp(ip, cli) != 0)
+      {
+        json_object_array_add (new_users,
+                               obj);
+      }
+    }
+    json_object_put(users);
+    users = new_users;
     free(cli);
+    dump();
 }
 
 /**
@@ -101,20 +141,16 @@ void onmessage(int fd, const unsigned char *msg, uint64_t size, int type)
         json_object_object_add (obj_tmp,
                                 "action",
                                 json_object_new_string("pong"));
-        ws_sendframe(fd,
-                     json_object_to_json_string(obj_tmp),
-                     strlen(json_object_to_json_string(obj_tmp)),
-                     2,
-                     type);
+        ws_sendframe_txt(fd,
+                         json_object_to_json_string(obj_tmp),
+                         2);
         json_object_put(obj_tmp);
       }
       else if (strcmp(action, "clear") == 0)
       { 
-        ws_sendframe(fd,
-                     json_object_to_json_string(obj),
-                     strlen(json_object_to_json_string(obj)),
-                     1,
-                     type);
+        ws_sendframe_txt(fd,
+                         json_object_to_json_string(obj),
+                         1);
       }
       else if (strcmp(action, "brush") == 0)
       { 
@@ -279,14 +315,9 @@ void onmessage(int fd, const unsigned char *msg, uint64_t size, int type)
             json_object_object_add (out,
                                     "stroke",
                                     stroke);
-            const char *p;
-            p = json_object_to_json_string_ext (out,
-                                                JSON_C_TO_STRING_PLAIN);
-            ws_sendframe(fd,
-                         (const char *)p,
-                         strlen(p),
-                         2,
-                         type);
+            ws_sendframe_txt(fd,
+                             json_object_to_json_string(out),
+                             2);
             json_object_put(out);
           }
           mypaint_surface_unref(surface);
@@ -299,11 +330,10 @@ void onmessage(int fd, const unsigned char *msg, uint64_t size, int type)
       printf("I receive a binary message: (size: %" PRId64 "), from: %s/%d\n",
       size, cli, fd);
 #endif
-      ws_sendframe(fd, 
+      ws_sendframe_bin(fd, 
                    (const char *)msg,
                    size,
-                   1,
-                   type);
+                   1);
       break;
     default:
       break;
@@ -312,9 +342,9 @@ void onmessage(int fd, const unsigned char *msg, uint64_t size, int type)
 
 }
 
-static void terminate(int signum)
+static void terminate()
 {
-    exit(0);
+  exit(0);
 }
 
 int main(int argc, char *argv[])
@@ -337,6 +367,9 @@ int main(int argc, char *argv[])
   */
   brush = mypaint_brush_new();
   mypaint_brush_from_defaults(brush);
+
+  users = json_object_new_array();
+  dump();
 
   /*
     WebSocket
