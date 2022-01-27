@@ -1,3 +1,6 @@
 [submodule "libmypaint"]
 	path = libmypaint
 	url = https://github.com/mypaint/libmypaint
+[submodule "wsServer"]
+	path = wsServer
+	url = https://github.com/chengjianwen/wsServer
