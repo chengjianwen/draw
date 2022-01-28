@@ -6,10 +6,14 @@
  * to the [RFC 6455](https://tools.ietf.org/html/rfc6455).
  */
 
+#define _POSIX_C_SOURCE 200809L
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <inttypes.h>
 #include <getopt.h>
+#include <sys/types.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <string.h>
 #include <signal.h>
@@ -18,21 +22,161 @@
 #include <json-c/json.h>
 #include <math.h>
 #include <time.h>
+#include <pthread.h>
 #include <ws.h>
 
-#define DISABLE_VERBOSE 1
+//#define DISABLE_VERBOSE 1
 
 MyPaintBrush *brush;
 json_object  *users;
+bool         recording;
 
-static void dump()
+static void dumpuser()
 {
-  FILE *fp = fopen ("/var/run/users/users.json", "w");
+  FILE *fp = fopen ("/tmp/draw/data/user.json", "w");
   if (fp)
   {
     fputs(json_object_to_json_string(users), fp);
     fclose (fp);
   }
+}
+
+static void dumpstroke(json_object *obj)
+{
+  char buf[64];
+  int index;
+  for (index = 0; index < 10000; index++)
+  {
+    struct stat   buffer; 
+    sprintf (buf, "/tmp/draw/data/stroke_%04d.json", index);
+    if (stat (buf, &buffer) != 0)
+      break;
+  }
+  if (index == 10000)
+  {
+    fprintf (stderr, "too more stroke files, please remove/backup them first!\n");
+    return;
+  }
+
+  FILE *fp = fopen (buf, "w");
+  if (fp)
+  {
+    fputs(json_object_to_json_string(obj), fp);
+    fclose (fp);
+  }
+}
+
+static void dumpmedia(const char *msg, int size)
+{
+  char buf[64];
+  int index;
+  for (index = 0; index < 10000; index++)
+  {
+    struct stat   buffer; 
+    sprintf (buf, "/tmp/draw/data/media_%04d.pcm", index);
+    if (stat (buf, &buffer) != 0
+    || time(NULL) - buffer.st_mtime < 5)
+      break;
+  }
+  if (index == 10000)
+  {
+    fprintf (stderr, "too more media files, please remove/backup them first!\n");
+    return;
+  }
+
+  FILE *fp = fopen (buf, "a");
+  if (fp)
+  {
+    fwrite(msg, 1, size, fp);
+    fclose (fp);
+  }
+}
+
+/*
+ * 生成media.json文件
+ */
+static void dumpmedia2()
+{
+  json_object *obj;
+  obj = json_object_new_array();
+  char buf[64];
+  int index;
+  for (index = 0; index < 10000; index++)
+  {
+    struct stat   buffer; 
+    sprintf (buf, "/tmp/draw/data/media_%04d.pcm", index);
+    if (stat (buf, &buffer) < 0)
+      break;
+    sprintf (buf, "media_%04d", index);
+    json_object_array_add(obj, 
+                          json_object_new_string((char *)buf));
+  }
+  FILE *fp = fopen ("/tmp/draw/data/media.json", "w");
+  if (fp)
+  {
+    fputs(json_object_to_json_string(obj), fp);
+    fclose (fp);
+  }
+  json_object_put(obj);
+}
+
+static void *playstroke(void *data)
+{
+  json_object *obj = (json_object *)data;
+  /*
+  json_object *obj_tmp;
+  json_object_object_get_ex(obj, "name", &obj_tmp);
+  FILE *fp = fopen (json_object_get_string(obj_tmp), "r");
+  */
+  json_object_put (obj);
+  return NULL;
+}
+
+static void *playmedia(void *data)
+{
+  json_object *obj = (json_object *)data;
+  json_object *obj_tmp;
+  json_object_object_get_ex(obj, "name", &obj_tmp);
+  char buf[8192];
+  sprintf (buf,
+           "/tmp/draw/data/%s.pcm",
+           json_object_get_string(obj_tmp));
+
+  FILE *fp = fopen (buf,
+                    "r");
+  if (fp)
+  {
+    json_object_object_get_ex(obj, "fd", &obj_tmp);
+    // send media to broadcast
+    struct timespec startTime;
+    clock_gettime(CLOCK_REALTIME, &startTime);
+    while (fread(buf, 1, 8192, fp) == 8192)
+    {
+      ws_sendframe_bin(json_object_get_int(obj_tmp),
+                       (const char *)buf,
+                       8192,
+                       2);
+      struct timespec now, delay;
+      clock_gettime(CLOCK_REALTIME, &now);
+      startTime.tv_nsec += 512 * 1000000L;
+      startTime.tv_sec += startTime.tv_nsec / 1000000000L;
+      startTime.tv_nsec = startTime.tv_nsec % 1000000000L;
+      delay.tv_sec = startTime.tv_sec - now.tv_sec;
+      delay.tv_nsec = startTime.tv_nsec - now.tv_nsec;
+      if (delay.tv_nsec < 0)
+      {
+        delay.tv_sec -= 1;
+        delay.tv_nsec += 1.0e9;
+      }
+      printf ("starttime: %ld sec, %ldnsec\n", startTime.tv_sec, startTime.tv_nsec);
+      printf ("      now: %ld sec, %ldnsec\n", now.tv_sec, now.tv_nsec);
+      printf ("    delay: %ld sec, %ldnsec\n", delay.tv_sec, delay.tv_nsec);
+      nanosleep(&delay, NULL);
+    }
+    fclose (fp);
+  }
+  json_object_put (obj);
+  return NULL;
 }
 
 void onopen(int fd)
@@ -48,11 +192,14 @@ void onopen(int fd)
                             "ip",
                              json_object_new_string(cli));
     json_object_object_add (obj,
+                            "fd",
+                             json_object_new_int(fd));
+    json_object_object_add (obj,
                             "time",
                              json_object_new_int64(time(NULL)));
     json_object_array_add (users,
                            obj);
-    dump();
+    dumpuser();
     free(cli);
 }
 
@@ -70,16 +217,16 @@ void onclose(int fd)
 #ifndef DISABLE_VERBOSE
     printf("Connection closed, client: %d | addr: %s\n", fd, cli);
 #endif
-    json_object *new_users, *obj;
+    free(cli);
+    json_object *new_users, *obj, *obj_tmp;
     new_users = json_object_new_array();
-    char *ip;
     for (int i = 0;
          i < json_object_array_length(users);
          i++)
     {
       obj = json_object_array_get_idx(users, i);
-      ip = json_object_get_string(json_object_object_get(obj, "ip"));
-      if (strcmp(ip, cli) != 0)
+      json_object_object_get_ex(obj, "fd", &obj_tmp);
+      if (fd != json_object_get_int(obj_tmp))
       {
         json_object_array_add (new_users,
                                obj);
@@ -87,8 +234,7 @@ void onclose(int fd)
     }
     json_object_put(users);
     users = new_users;
-    free(cli);
-    dump();
+    dumpuser();
 }
 
 /**
@@ -137,14 +283,15 @@ void onmessage(int fd, const unsigned char *msg, uint64_t size, int type)
         action = json_object_get_string (obj_tmp);
       if (strcmp(action, "ping") == 0)
       { 
-        obj_tmp = json_object_new_object();
-        json_object_object_add (obj_tmp,
+        json_object *obj_tmp_tmp;
+        obj_tmp_tmp = json_object_new_object();
+        json_object_object_add (obj_tmp_tmp,
                                 "action",
                                 json_object_new_string("pong"));
         ws_sendframe_txt(fd,
-                         json_object_to_json_string(obj_tmp),
+                         json_object_to_json_string(obj_tmp_tmp),
                          2);
-        json_object_put(obj_tmp);
+        json_object_put(obj_tmp_tmp);
       }
       else if (strcmp(action, "clear") == 0)
       { 
@@ -152,27 +299,99 @@ void onmessage(int fd, const unsigned char *msg, uint64_t size, int type)
                          json_object_to_json_string(obj),
                          1);
       }
+      else if (strcmp(action, "start") == 0)
+      { 
+        recording = true;
+        ws_sendframe_txt(fd,
+                         json_object_to_json_string(obj),
+                         1);
+      }
+      else if (strcmp(action, "stop") == 0)
+      { 
+        recording = false;
+        dumpmedia2();
+      }
+      else if (strcmp(action, "media") == 0)
+      { 
+        json_object *obj_tmp_tmp, *obj_tmp_tmp_tmp;
+        json_object_object_get_ex(obj,
+                                  "name",
+                                   &obj_tmp_tmp);
+        obj_tmp_tmp_tmp = json_object_new_object();
+	json_object_object_add (obj_tmp_tmp_tmp,
+                                "fd",
+                                json_object_new_int(fd));
+	json_object_object_add (obj_tmp_tmp_tmp,
+                                "name",
+                                json_object_get(obj_tmp_tmp));
+        // send start
+        ws_sendframe_txt(fd,
+                         "{\"action\": \"start\"}",
+                         2);
+        /*
+	pthread_t  pthread_media, pthread_stroke;
+        // send media
+	pthread_create(&pthread_media,
+                       NULL,
+                       playmedia,
+                       (void *)json_object_get(obj_tmp));
+        */
+        playmedia((void *)obj_tmp_tmp_tmp);
+        // send stroke
+	/*
+	pthread_create(&pthread_stroke,
+                       NULL,
+                       playstroke,
+                       (void *)json_object_get(obj_tmp));
+        */
+      }
+      else if (strcmp(action, "nick") == 0)
+      { 
+        json_object *obj_tmp_tmp, *obj_tmp_tmp_tmp;
+        for (int i = 0;
+             i < json_object_array_length(users);
+             i++)
+        {
+           obj_tmp_tmp = json_object_array_get_idx(users, i);
+           json_object_object_get_ex(obj_tmp,
+                                     "fd",
+                                     &obj_tmp_tmp_tmp);
+           if (fd == json_object_get_int(obj_tmp_tmp_tmp))
+           {
+              json_object_object_get_ex(obj,
+			                "nickname",
+					&obj_tmp_tmp_tmp);
+              json_object_object_add (obj_tmp_tmp,
+                                      "nick",
+                                      obj_tmp_tmp_tmp);
+              break;
+           }
+        }
+        dumpuser();
+      }
       else if (strcmp(action, "brush") == 0)
       { 
+        json_object *obj_tmp_tmp;
         if (json_object_object_get_ex(obj,
                                       "brush",
-                                      &obj_tmp))
+                                      &obj_tmp_tmp))
           mypaint_brush_from_string(brush,
-                                    json_object_to_json_string(obj_tmp));
+                                    json_object_to_json_string(obj_tmp_tmp));
       }
       else if (strcmp(action, "stroke") == 0)
       {
+        json_object *obj_tmp_tmp;
         if (json_object_object_get_ex(obj,
                                       "width",
-                                      &obj_tmp))
-          width = json_object_get_int(obj_tmp);
+                                      &obj_tmp_tmp))
+          width = json_object_get_int(obj_tmp_tmp);
         if (json_object_object_get_ex(obj,
                                       "height",
-                                      &obj_tmp))
-          height = json_object_get_int(obj_tmp);
+                                      &obj_tmp_tmp))
+          height = json_object_get_int(obj_tmp_tmp);
         if (json_object_object_get_ex(obj,
                                       "stroke",
-                                      &obj_tmp))
+                                      &obj_tmp_tmp))
         {
           MyPaintSurface *surface = (MyPaintSurface *) mypaint_fixed_tiled_surface_new(width, height);
           MyPaintTiledSurface *tiled_surface = (MyPaintTiledSurface *)surface;
@@ -180,13 +399,13 @@ void onmessage(int fd, const unsigned char *msg, uint64_t size, int type)
           mypaint_brush_reset (brush);
           mypaint_surface_begin_atomic (surface);
           for (size_t i = 0;
-               i <  json_object_array_length(obj_tmp);
+               i <  json_object_array_length(obj_tmp_tmp);
                i++)
           {
-            json_object *obj_tmp_tmp;
-            obj_tmp_tmp = json_object_array_get_idx(obj_tmp,
-                                                    i);
             json_object *obj_tmp_tmp_tmp;
+            obj_tmp_tmp_tmp = json_object_array_get_idx(obj_tmp_tmp,
+                                                        i);
+            json_object *obj_tmp_tmp_tmp_tmp;
             float            x = 0.0;
             float            y = 0.0;
             float     pressure = 0.5;
@@ -197,30 +416,37 @@ void onmessage(int fd, const unsigned char *msg, uint64_t size, int type)
             float viewrotation = 0.0;
             float barrel_rotation = 0.0;
             int linear = 0;
-            if (json_object_object_get_ex(obj_tmp_tmp,
+            long long   last;
+            if (json_object_object_get_ex(obj_tmp_tmp_tmp,
                                           "x",
-                                          &obj_tmp_tmp_tmp))
-              x = json_object_get_double(obj_tmp_tmp_tmp);
-            if (json_object_object_get_ex(obj_tmp_tmp,
+                                          &obj_tmp_tmp_tmp_tmp))
+              x = json_object_get_double(obj_tmp_tmp_tmp_tmp);
+            if (json_object_object_get_ex(obj_tmp_tmp_tmp,
                                           "y",
-                                          &obj_tmp_tmp_tmp))
-              y = json_object_get_double(obj_tmp_tmp_tmp);
-            if (json_object_object_get_ex(obj_tmp_tmp,
+                                          &obj_tmp_tmp_tmp_tmp))
+              y = json_object_get_double(obj_tmp_tmp_tmp_tmp);
+            if (json_object_object_get_ex(obj_tmp_tmp_tmp,
                                           "pressure",
-                                          &obj_tmp_tmp_tmp))
-              pressure = json_object_get_double(obj_tmp_tmp_tmp);
-            if (json_object_object_get_ex(obj_tmp_tmp,
+                                          &obj_tmp_tmp_tmp_tmp))
+              pressure = json_object_get_double(obj_tmp_tmp_tmp_tmp);
+            if (json_object_object_get_ex(obj_tmp_tmp_tmp,
                                           "xtilt",
-                                          &obj_tmp_tmp_tmp))
-              xtilt = json_object_get_double(obj_tmp_tmp_tmp);
-            if (json_object_object_get_ex(obj_tmp_tmp,
+                                          &obj_tmp_tmp_tmp_tmp))
+              xtilt = json_object_get_double(obj_tmp_tmp_tmp_tmp);
+            if (json_object_object_get_ex(obj_tmp_tmp_tmp,
                                           "ytilt",
-                                          &obj_tmp_tmp_tmp))
-              ytilt = json_object_get_double(obj_tmp_tmp_tmp);
-            if (json_object_object_get_ex(obj_tmp_tmp,
-                                          "dtime",
-                                          &obj_tmp_tmp_tmp))
-              dtime = (float)json_object_get_double(obj_tmp_tmp_tmp) / 1000;
+                                          &obj_tmp_tmp_tmp_tmp))
+              ytilt = json_object_get_double(obj_tmp_tmp_tmp_tmp);
+            if (json_object_object_get_ex(obj_tmp_tmp_tmp,
+                                          "time",
+                                          &obj_tmp_tmp_tmp_tmp))
+            {
+              if (i == 0)
+                dtime = 0.0;
+              else
+                dtime = (float)(json_object_get_int64(obj_tmp_tmp_tmp_tmp) - last) / 1000;
+              last = (float)json_object_get_int64(obj_tmp_tmp_tmp_tmp);
+	    }
             mypaint_brush_stroke_to (brush,
                                      surface,
                                      x,
@@ -321,6 +547,10 @@ void onmessage(int fd, const unsigned char *msg, uint64_t size, int type)
             json_object_put(out);
           }
           mypaint_surface_unref(surface);
+	  if (recording)
+	  {
+            dumpstroke(obj_tmp);
+	  }
         }
       }
       json_object_put(obj);
@@ -334,6 +564,10 @@ void onmessage(int fd, const unsigned char *msg, uint64_t size, int type)
                    (const char *)msg,
                    size,
                    1);
+      if (recording)
+      {
+        dumpmedia((const char *)msg, size);
+      }
       break;
     default:
       break;
@@ -369,8 +603,9 @@ int main(int argc, char *argv[])
   mypaint_brush_from_defaults(brush);
 
   users = json_object_new_array();
-  dump();
+  dumpuser();
 
+  recording = false;
   /*
     WebSocket
   */

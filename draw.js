@@ -8,7 +8,8 @@ function draw() {
   var recorder;
   var script;
   var player;
-  var osc;
+  var startTime;
+  var count;
   var canvas;
   var timer;
   var alive_id;
@@ -18,7 +19,9 @@ function draw() {
   var brush;
   var clear;
   var user;
-  var test;
+  var nick;
+  var media;
+  var last
 
   let wsurl;
   if (location.protocol == 'http:')
@@ -59,6 +62,8 @@ function draw() {
   ws.onmessage = function(event) {
     if (event.data instanceof ArrayBuffer)
     {
+      count++;
+      var playTime = startTime + count * 0.512;
       var int8 = new Int8Array(event.data);
       var buffer = context.createBuffer(1, int8.length, context.sampleRate);
       for (var i = 0; i < int8.length; i++)
@@ -66,9 +71,10 @@ function draw() {
         buffer.getChannelData(0)[i] = int8[i] / 127;
       }
       player = context.createBufferSource();
-      player.connect(context.destination);
       player.buffer = buffer;
-      player.start();
+      player.connect(context.destination);
+      player.start(playTime);
+      console.log(playTime - context.currentTime);
     }
     else
     {
@@ -76,6 +82,11 @@ function draw() {
       if (obj.action == 'pong')
       { 
       } 
+      else if (obj.action == 'start')
+      {
+        startTime = context.currentTime;
+        count = 0;
+      }
       else if (obj.action == 'clear')
       {
         canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
@@ -221,44 +232,28 @@ function draw() {
         int8[i] = float32[i] * 127;
       ws.send(int8.buffer);
     }
-    osc = context.createOscillator();
-    osc.type = 'sine';
-    osc.start();
   });
   function start(e) {
+    var msg = {
+      action: 'start'
+    };
+    ws.send(JSON.stringify(msg));
     record.innerHTML = "🔊";
     recorder.connect(script);
     script.connect(context.destination);
     record.onclick = stop;
   };
-
-  // 结束录音
+// 结束录音
   function stop(e) {
+    var msg = {
+      action: 'stop'
+    };
+    ws.send(JSON.stringify(msg));
     recorder.disconnect();
     script.disconnect();
     record.innerHTML = "🔇";
     record.onclick = start;
   }
-
-  // 测试
-  test = document.createElement("button");
-  test.innerHTML = "start";
-  test.style.padding = '5px';
-  test.style.margin = '5px';
-  test.onclick = starttest;
-  sticky.appendChild(test);
-
-  function starttest(e) {
-    test.innerHTML = "stop";
-    osc.connect(context.destination);
-    test.onclick = stoptest;
-  };
-
-  function stoptest(e) {
-    test.innerHTML = "start";
-    osc.disconnect();
-    test.onclick = starttest;
-  };
 
   user = document.createElement("button");
   user.innerHTML = "🧍";
@@ -291,13 +286,13 @@ function draw() {
         for (var i = 0; i < u.length; i++)
         {
           var div = document.createElement("div");
-          div.innerHTML = u[i].ip;
+          div.innerHTML = u[i].nick == undefined ? 'noname' : u[i].nick;
           div.style.width = '100%';
           users.appendChild(div);
         }
       }
     };
-    xhttp.open("GET", '/users/users.json', true);
+    xhttp.open("GET", '/user/user.json', true);
     xhttp.send();
 
     document.body.insertBefore(users, undefined);
@@ -308,6 +303,47 @@ function draw() {
   }
   sticky.appendChild(user);
 
+  nick = document.createElement("input");
+  nick.style.padding = '5px';
+  nick.style.margin = '5px';
+  nick.style.width = '3em';
+  nick.oninput = function() {
+    var msg = {
+      action: 'nick',
+      nickname: nick.value
+    };
+    ws.send(JSON.stringify(msg));
+  }
+  sticky.appendChild(nick);
+
+  media = document.createElement("select");
+  media.style.padding = '5px';
+  media.style.margin = '5px';
+  media.onchange = function() {
+    var msg = {
+      action: 'media',
+      name: media.value
+    };
+    ws.send(JSON.stringify(msg));
+  };
+  var xhttp = new XMLHttpRequest();
+  xhttp.onreadystatechange = function() {
+    if (this.readyState == 4 && this.status == 200) {
+      var mediaes = JSON.parse(xhttp.response);
+      for (var i = 0; i < mediaes.length; i++)
+      {
+        var option = document.createElement("option");
+        option.value = mediaes[i];
+        option.text = mediaes[i];
+        media.appendChild(option);
+      }
+    }
+  };
+  xhttp.open("GET", '/media/media.json', true);
+  xhttp.send();
+  sticky.appendChild(media);
+
+  timer = document.createElement("button");
   timer = document.createElement("button");
   timer.innerHTML = "0";
   timer.style.padding = '5px';
@@ -354,13 +390,13 @@ function draw() {
         y: (e.y - BB.top) | 0,
         pressure: parseFloat(e.pressure.toFixed(6)),
         xtilt: parseFloat(e.tiltX.toFixed(6)),
-        ytilt: parseFloat(e.tiltY.toFixed(6))
+        ytilt: parseFloat(e.tiltY.toFixed(6)),
       }
       if (stroke.length == 0)
         motion.dtime = 0;
       else
         motion.dtime = new Date().getTime() - last;
-      var last = new Date().getTime();
+      last = new Date().getTime();
       stroke.push(motion);
     }
   };

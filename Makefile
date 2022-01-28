@@ -6,7 +6,7 @@ INCLUDE  = -I $(WSDIR)/include
 CFLAGS   = -Wall
 CFLAGS  += $(INCLUDE) -std=c99 -pthread -pedantic
 CFLAGS  += `pkg-config --cflags libmypaint-2.0`
-CFLAGS  += -g
+CFLAGS  += -g -lmcheck
 LIB      = $(WSDIR)/libws.a
 LIB     += `pkg-config --libs libmypaint-2.0`
 LIB     += -lm
