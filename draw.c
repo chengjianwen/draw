@@ -45,7 +45,7 @@ static void *playstroke(void *data)
   {
     char  sql[1024];
     sprintf (sql,
-            "SELECT JulianDay(time) - JulianDay('%s') AS delay, stroke FROM STROKE WHEWE delay > 0 ORDER BY delay;",
+            "SELECT (JulianDay(time) - JulianDay('%s')) * 86400 AS delay, stroke FROM STROKE WHERE delay > 0 ORDER BY delay;",
             json_object_get_string(obj_time));
     sqlite3_stmt* stmt;
     sqlite3_prepare (conn,
@@ -109,9 +109,6 @@ static void *playmedia(void *data)
           delay.tv_sec -= 1;
           delay.tv_nsec += 1.0e9;
         }
-        printf ("starttime: %ld sec, %ldnsec\n", startTime.tv_sec, startTime.tv_nsec);
-        printf ("      now: %ld sec, %ldnsec\n", now.tv_sec, now.tv_nsec);
-        printf ("    delay: %ld sec, %ldnsec\n", delay.tv_sec, delay.tv_nsec);
         nanosleep(&delay, NULL);
       }
       fclose (fp);
@@ -284,6 +281,8 @@ void onmessage(int fd, const unsigned char *msg, uint64_t size, int type)
           if (playing)
           {
             playing = false;
+	    pthread_cancel (pthread_media);
+	    pthread_cancel (pthread_stroke);
             pthread_join(pthread_media, NULL);
             pthread_join(pthread_stroke, NULL);
           }
@@ -490,7 +489,7 @@ void onmessage(int fd, const unsigned char *msg, uint64_t size, int type)
                                2);
               if (recording)
               {
-                char sql[40960];
+                char *sql = malloc (strlen(json_object_to_json_string(obj)) + 100);
                 sprintf (sql,
                          "INSERT INTO STROKE (time, stroke) VALUES (CURRENT_TIMESTAMP, '%s');",
                          json_object_to_json_string(obj));
@@ -502,6 +501,7 @@ void onmessage(int fd, const unsigned char *msg, uint64_t size, int type)
                                  NULL);
                 sqlite3_step (stmt);
                 sqlite3_finalize (stmt);
+		free (sql);
               }
             }
             mypaint_surface_unref(surface);
@@ -584,36 +584,20 @@ int main(int argc, char *argv[])
 
   sqlite3_open ("/tmp/draw/data/stroke.db",
                 &conn);
-  char sql[1024];
-  sprintf (sql,
-           "CREATE TABLE IF NOT EXISTS ONLINE (nick, fd, time);");
+  char *sql[] = {"CREATE TABLE IF NOT EXISTS ONLINE (nick, fd, time);",
+                "CREATE TABLE IF NOT EXISTS STROKE (time, stroke);",
+                "CREATE TABLE IF NOT EXISTS MEDIA (time, filename);",
+                "DELETE FROM ONLINE;"};
   sqlite3_stmt* stmt;
-  sqlite3_prepare (conn,
-                   sql,
-                   -1,
-                   &stmt,
-                   NULL);
-  sqlite3_step (stmt);
-  sqlite3_finalize (stmt);
-
-  sprintf (sql,
-           "CREATE TABLE IF NOT EXISTS STROKE (time, stroke);");
-  sqlite3_prepare (conn,
-                   sql,
-                   -1,
-                   &stmt,
-                   NULL);
-  sqlite3_step (stmt);
-  sqlite3_finalize (stmt);
-
-  sprintf (sql,
-           "CREATE TABLE IF NOT EXISTS MEDIA (time, filename);");
-  sqlite3_prepare (conn,
-                   sql,
-                   -1,
-                   &stmt,
-                   NULL);
-  sqlite3_step (stmt);
+  for (int i = 0; i < 4; i++)
+  {
+    sqlite3_prepare (conn,
+                     sql[i],
+                     -1,
+                     &stmt,
+                     NULL);
+    sqlite3_step (stmt);
+  }
   sqlite3_finalize (stmt);
 
   recording = playing = false;
