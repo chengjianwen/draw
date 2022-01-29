@@ -5,10 +5,10 @@ WSDIR    = wsServer
 INCLUDE  = -I $(WSDIR)/include
 CFLAGS   = -Wall
 CFLAGS  += $(INCLUDE) -std=c99 -pthread -pedantic
-CFLAGS  += `pkg-config --cflags libmypaint-2.0`
+CFLAGS  += `pkg-config --cflags libmypaint-2.0 sqlite3 uuid`
 CFLAGS  += -g -lmcheck
 LIB      = $(WSDIR)/libws.a
-LIB     += `pkg-config --libs libmypaint-2.0`
+LIB     += `pkg-config --libs libmypaint-2.0 sqlite3 uuid`
 LIB     += -lm
 
 DISABLE_VERBOSE = no

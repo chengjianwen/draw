@@ -23,157 +23,99 @@
 #include <math.h>
 #include <time.h>
 #include <pthread.h>
+#include <sqlite3.h>
+#include <uuid/uuid.h>
 #include <ws.h>
 
 //#define DISABLE_VERBOSE 1
 
 MyPaintBrush *brush;
-json_object  *users;
 bool         recording;
-
-static void dumpuser()
-{
-  FILE *fp = fopen ("/tmp/draw/data/user.json", "w");
-  if (fp)
-  {
-    fputs(json_object_to_json_string(users), fp);
-    fclose (fp);
-  }
-}
-
-static void dumpstroke(json_object *obj)
-{
-  char buf[64];
-  int index;
-  for (index = 0; index < 10000; index++)
-  {
-    struct stat   buffer; 
-    sprintf (buf, "/tmp/draw/data/stroke_%04d.json", index);
-    if (stat (buf, &buffer) != 0)
-      break;
-  }
-  if (index == 10000)
-  {
-    fprintf (stderr, "too more stroke files, please remove/backup them first!\n");
-    return;
-  }
-
-  FILE *fp = fopen (buf, "w");
-  if (fp)
-  {
-    fputs(json_object_to_json_string(obj), fp);
-    fclose (fp);
-  }
-}
-
-static void dumpmedia(const char *msg, int size)
-{
-  char buf[64];
-  int index;
-  for (index = 0; index < 10000; index++)
-  {
-    struct stat   buffer; 
-    sprintf (buf, "/tmp/draw/data/media_%04d.pcm", index);
-    if (stat (buf, &buffer) != 0
-    || time(NULL) - buffer.st_mtime < 5)
-      break;
-  }
-  if (index == 10000)
-  {
-    fprintf (stderr, "too more media files, please remove/backup them first!\n");
-    return;
-  }
-
-  FILE *fp = fopen (buf, "a");
-  if (fp)
-  {
-    fwrite(msg, 1, size, fp);
-    fclose (fp);
-  }
-}
-
-/*
- * 生成media.json文件
- */
-static void dumpmedia2()
-{
-  json_object *obj;
-  obj = json_object_new_array();
-  char buf[64];
-  int index;
-  for (index = 0; index < 10000; index++)
-  {
-    struct stat   buffer; 
-    sprintf (buf, "/tmp/draw/data/media_%04d.pcm", index);
-    if (stat (buf, &buffer) < 0)
-      break;
-    sprintf (buf, "media_%04d", index);
-    json_object_array_add(obj, 
-                          json_object_new_string((char *)buf));
-  }
-  FILE *fp = fopen ("/tmp/draw/data/media.json", "w");
-  if (fp)
-  {
-    fputs(json_object_to_json_string(obj), fp);
-    fclose (fp);
-  }
-  json_object_put(obj);
-}
+bool         playing;
+pthread_t    pthread_media, pthread_stroke;
+sqlite3      *conn;
+FILE         *mediafile = NULL;
 
 static void *playstroke(void *data)
 {
   json_object *obj = (json_object *)data;
-  /*
-  json_object *obj_tmp;
-  json_object_object_get_ex(obj, "name", &obj_tmp);
-  FILE *fp = fopen (json_object_get_string(obj_tmp), "r");
-  */
-  json_object_put (obj);
+  json_object *obj_time, *obj_fd;
+  if (json_object_object_get_ex(obj, "time", &obj_time)
+  && json_object_object_get_ex(obj, "fd", &obj_fd))
+  {
+    char  sql[1024];
+    sprintf (sql,
+            "SELECT JulianDay(time) - JulianDay('%s') AS delay, stroke FROM STROKE WHEWE delay > 0 ORDER BY delay;",
+            json_object_get_string(obj_time));
+    sqlite3_stmt* stmt;
+    sqlite3_prepare (conn,
+                     sql,
+                     -1,
+                     &stmt,
+                     NULL);
+    time_t  delay = 0;
+    while (sqlite3_step (stmt) == SQLITE_ROW)
+    {
+      delay = sqlite3_column_int(stmt, 0) - delay;
+      sleep(delay);
+      printf ("sleep seconds: %ld.\n", delay);
+      ws_sendframe_txt(json_object_get_int(obj_fd),
+                       (char *)sqlite3_column_text(stmt, 1),
+                       2);
+      if (!playing)
+        break;
+    }
+    sqlite3_finalize (stmt);
+    json_object_put (obj);
+  }
   return NULL;
 }
 
 static void *playmedia(void *data)
 {
-  json_object *obj = (json_object *)data;
-  json_object *obj_tmp;
-  json_object_object_get_ex(obj, "name", &obj_tmp);
-  char buf[8192];
-  sprintf (buf,
-           "/tmp/draw/data/%s.pcm",
-           json_object_get_string(obj_tmp));
+  json_object *obj, *obj_filename, *obj_fd;
+  obj = (json_object *)data;
 
-  FILE *fp = fopen (buf,
-                    "r");
-  if (fp)
+  if (json_object_object_get_ex(obj,
+                                "filename",
+                                &obj_filename)
+  && json_object_object_get_ex(obj,
+                               "fd",
+                               &obj_fd))
   {
-    json_object_object_get_ex(obj, "fd", &obj_tmp);
-    // send media to broadcast
-    struct timespec startTime;
-    clock_gettime(CLOCK_REALTIME, &startTime);
-    while (fread(buf, 1, 8192, fp) == 8192)
+    FILE *fp = fopen (json_object_get_string(obj_filename),
+                      "r");
+    if (fp)
     {
-      ws_sendframe_bin(json_object_get_int(obj_tmp),
-                       (const char *)buf,
-                       8192,
-                       2);
-      struct timespec now, delay;
-      clock_gettime(CLOCK_REALTIME, &now);
-      startTime.tv_nsec += 512 * 1000000L;
-      startTime.tv_sec += startTime.tv_nsec / 1000000000L;
-      startTime.tv_nsec = startTime.tv_nsec % 1000000000L;
-      delay.tv_sec = startTime.tv_sec - now.tv_sec;
-      delay.tv_nsec = startTime.tv_nsec - now.tv_nsec;
-      if (delay.tv_nsec < 0)
+      // send media to broadcast
+      struct timespec startTime;
+      clock_gettime(CLOCK_REALTIME, &startTime);
+      char buf[8192];
+      while (playing && fread(buf, 1, 8192, fp) == 8192)
       {
-        delay.tv_sec -= 1;
-        delay.tv_nsec += 1.0e9;
+        ws_sendframe_bin(json_object_get_int(obj_fd),
+                         (const char *)buf,
+                         8192,
+                         2);
+        struct timespec now, delay;
+        clock_gettime(CLOCK_REALTIME, &now);
+        startTime.tv_nsec += 512 * 1000000L;
+        startTime.tv_sec += startTime.tv_nsec / 1000000000L;
+        startTime.tv_nsec = startTime.tv_nsec % 1000000000L;
+        delay.tv_sec = startTime.tv_sec - now.tv_sec;
+        delay.tv_nsec = startTime.tv_nsec - now.tv_nsec;
+        if (delay.tv_nsec < 0)
+        {
+          delay.tv_sec -= 1;
+          delay.tv_nsec += 1.0e9;
+        }
+        printf ("starttime: %ld sec, %ldnsec\n", startTime.tv_sec, startTime.tv_nsec);
+        printf ("      now: %ld sec, %ldnsec\n", now.tv_sec, now.tv_nsec);
+        printf ("    delay: %ld sec, %ldnsec\n", delay.tv_sec, delay.tv_nsec);
+        nanosleep(&delay, NULL);
       }
-      printf ("starttime: %ld sec, %ldnsec\n", startTime.tv_sec, startTime.tv_nsec);
-      printf ("      now: %ld sec, %ldnsec\n", now.tv_sec, now.tv_nsec);
-      printf ("    delay: %ld sec, %ldnsec\n", delay.tv_sec, delay.tv_nsec);
-      nanosleep(&delay, NULL);
+      fclose (fp);
     }
-    fclose (fp);
   }
   json_object_put (obj);
   return NULL;
@@ -186,21 +128,19 @@ void onopen(int fd)
 #ifndef DISABLE_VERBOSE
     printf("Connection opened, client: %d | addr: %s\n", fd, cli);
 #endif
-    json_object *obj;
-    obj = json_object_new_object();
-    json_object_object_add (obj,
-                            "ip",
-                             json_object_new_string(cli));
-    json_object_object_add (obj,
-                            "fd",
-                             json_object_new_int(fd));
-    json_object_object_add (obj,
-                            "time",
-                             json_object_new_int64(time(NULL)));
-    json_object_array_add (users,
-                           obj);
-    dumpuser();
     free(cli);
+    char sql[1024];
+    sprintf (sql,
+             "INSERT INTO ONLINE (fd, time) VALUES (%d, CURRENT_TIMESTAMP);",
+             fd);
+    sqlite3_stmt* stmt;
+    sqlite3_prepare (conn,
+                     sql,
+                     -1,
+                     &stmt,
+                     NULL);
+    sqlite3_step (stmt);
+    sqlite3_finalize (stmt);
 }
 
 /**
@@ -218,23 +158,18 @@ void onclose(int fd)
     printf("Connection closed, client: %d | addr: %s\n", fd, cli);
 #endif
     free(cli);
-    json_object *new_users, *obj, *obj_tmp;
-    new_users = json_object_new_array();
-    for (int i = 0;
-         i < json_object_array_length(users);
-         i++)
-    {
-      obj = json_object_array_get_idx(users, i);
-      json_object_object_get_ex(obj, "fd", &obj_tmp);
-      if (fd != json_object_get_int(obj_tmp))
-      {
-        json_object_array_add (new_users,
-                               obj);
-      }
-    }
-    json_object_put(users);
-    users = new_users;
-    dumpuser();
+    char sql[1024];
+    sprintf (sql,
+             "DELETE FROM ONLINE WHERE fd =  %d;",
+             fd);
+    sqlite3_stmt* stmt;
+    sqlite3_prepare (conn,
+                     sql,
+                     -1,
+                     &stmt,
+                     NULL);
+    sqlite3_step (stmt);
+    sqlite3_finalize (stmt);
 }
 
 /**
@@ -273,284 +208,304 @@ void onmessage(int fd, const unsigned char *msg, uint64_t size, int type)
       ;
       json_object *obj;
       obj = json_tokener_parse((char *)msg);
-      int width, height;
-      const char *action;
-  
-      json_object *obj_tmp;
+
+      json_object *obj_action;
       if (json_object_object_get_ex(obj,
                                     "action",
-                                    &obj_tmp))
-        action = json_object_get_string (obj_tmp);
-      if (strcmp(action, "ping") == 0)
-      { 
-        json_object *obj_tmp_tmp;
-        obj_tmp_tmp = json_object_new_object();
-        json_object_object_add (obj_tmp_tmp,
-                                "action",
-                                json_object_new_string("pong"));
-        ws_sendframe_txt(fd,
-                         json_object_to_json_string(obj_tmp_tmp),
-                         2);
-        json_object_put(obj_tmp_tmp);
-      }
-      else if (strcmp(action, "clear") == 0)
-      { 
-        ws_sendframe_txt(fd,
-                         json_object_to_json_string(obj),
-                         1);
-      }
-      else if (strcmp(action, "start") == 0)
-      { 
-        recording = true;
-        ws_sendframe_txt(fd,
-                         json_object_to_json_string(obj),
-                         1);
-      }
-      else if (strcmp(action, "stop") == 0)
-      { 
-        recording = false;
-        dumpmedia2();
-      }
-      else if (strcmp(action, "media") == 0)
-      { 
-        json_object *obj_tmp_tmp, *obj_tmp_tmp_tmp;
-        json_object_object_get_ex(obj,
-                                  "name",
-                                   &obj_tmp_tmp);
-        obj_tmp_tmp_tmp = json_object_new_object();
-	json_object_object_add (obj_tmp_tmp_tmp,
-                                "fd",
-                                json_object_new_int(fd));
-	json_object_object_add (obj_tmp_tmp_tmp,
-                                "name",
-                                json_object_get(obj_tmp_tmp));
-        // send start
-        ws_sendframe_txt(fd,
-                         "{\"action\": \"start\"}",
-                         2);
-        /*
-	pthread_t  pthread_media, pthread_stroke;
-        // send media
-	pthread_create(&pthread_media,
-                       NULL,
-                       playmedia,
-                       (void *)json_object_get(obj_tmp));
-        */
-        playmedia((void *)obj_tmp_tmp_tmp);
-        // send stroke
-	/*
-	pthread_create(&pthread_stroke,
-                       NULL,
-                       playstroke,
-                       (void *)json_object_get(obj_tmp));
-        */
-      }
-      else if (strcmp(action, "nick") == 0)
-      { 
-        json_object *obj_tmp_tmp, *obj_tmp_tmp_tmp;
-        for (int i = 0;
-             i < json_object_array_length(users);
-             i++)
-        {
-           obj_tmp_tmp = json_object_array_get_idx(users, i);
-           json_object_object_get_ex(obj_tmp,
-                                     "fd",
-                                     &obj_tmp_tmp_tmp);
-           if (fd == json_object_get_int(obj_tmp_tmp_tmp))
-           {
-              json_object_object_get_ex(obj,
-			                "nickname",
-					&obj_tmp_tmp_tmp);
-              json_object_object_add (obj_tmp_tmp,
-                                      "nick",
-                                      obj_tmp_tmp_tmp);
-              break;
-           }
-        }
-        dumpuser();
-      }
-      else if (strcmp(action, "brush") == 0)
-      { 
-        json_object *obj_tmp_tmp;
-        if (json_object_object_get_ex(obj,
-                                      "brush",
-                                      &obj_tmp_tmp))
-          mypaint_brush_from_string(brush,
-                                    json_object_to_json_string(obj_tmp_tmp));
-      }
-      else if (strcmp(action, "stroke") == 0)
+                                    &obj_action))
       {
-        json_object *obj_tmp_tmp;
-        if (json_object_object_get_ex(obj,
-                                      "width",
-                                      &obj_tmp_tmp))
-          width = json_object_get_int(obj_tmp_tmp);
-        if (json_object_object_get_ex(obj,
-                                      "height",
-                                      &obj_tmp_tmp))
-          height = json_object_get_int(obj_tmp_tmp);
-        if (json_object_object_get_ex(obj,
-                                      "stroke",
-                                      &obj_tmp_tmp))
+        if (strcmp(json_object_get_string (obj_action), "ping") == 0)
+        { 
+          json_object *obj_pong;
+          obj_pong = json_object_new_object();
+          json_object_object_add (obj_pong,
+                                  "action",
+                                  json_object_new_string("pong"));
+          ws_sendframe_txt(fd,
+                           json_object_to_json_string(obj_pong),
+                           2);
+          json_object_put(obj_pong);
+        }
+        else if (strcmp(json_object_get_string (obj_action), "clear") == 0)
+        { 
+          ws_sendframe_txt(fd,
+                           json_object_to_json_string(obj),
+                           1);
+        }
+        else if (strcmp(json_object_get_string (obj_action), "start") == 0)
         {
-          MyPaintSurface *surface = (MyPaintSurface *) mypaint_fixed_tiled_surface_new(width, height);
-          MyPaintTiledSurface *tiled_surface = (MyPaintTiledSurface *)surface;
-          mypaint_brush_new_stroke (brush);
-          mypaint_brush_reset (brush);
-          mypaint_surface_begin_atomic (surface);
-          for (size_t i = 0;
-               i <  json_object_array_length(obj_tmp_tmp);
-               i++)
+          recording = true;
+          ws_sendframe_txt(fd,
+                           json_object_to_json_string(obj),
+                           1);
+        }
+        else if (strcmp(json_object_get_string (obj_action), "stop") == 0)
+        { 
+          recording = false;
+          if (mediafile)
           {
-            json_object *obj_tmp_tmp_tmp;
-            obj_tmp_tmp_tmp = json_object_array_get_idx(obj_tmp_tmp,
-                                                        i);
-            json_object *obj_tmp_tmp_tmp_tmp;
-            float            x = 0.0;
-            float            y = 0.0;
-            float     pressure = 0.5;
-            float        xtilt = 0.0;
-            float        ytilt = 0.0;
-            float        dtime = 0.0;
-            float     viewzoom = 1.0;
-            float viewrotation = 0.0;
-            float barrel_rotation = 0.0;
-            int linear = 0;
-            long long   last;
-            if (json_object_object_get_ex(obj_tmp_tmp_tmp,
-                                          "x",
-                                          &obj_tmp_tmp_tmp_tmp))
-              x = json_object_get_double(obj_tmp_tmp_tmp_tmp);
-            if (json_object_object_get_ex(obj_tmp_tmp_tmp,
-                                          "y",
-                                          &obj_tmp_tmp_tmp_tmp))
-              y = json_object_get_double(obj_tmp_tmp_tmp_tmp);
-            if (json_object_object_get_ex(obj_tmp_tmp_tmp,
-                                          "pressure",
-                                          &obj_tmp_tmp_tmp_tmp))
-              pressure = json_object_get_double(obj_tmp_tmp_tmp_tmp);
-            if (json_object_object_get_ex(obj_tmp_tmp_tmp,
-                                          "xtilt",
-                                          &obj_tmp_tmp_tmp_tmp))
-              xtilt = json_object_get_double(obj_tmp_tmp_tmp_tmp);
-            if (json_object_object_get_ex(obj_tmp_tmp_tmp,
-                                          "ytilt",
-                                          &obj_tmp_tmp_tmp_tmp))
-              ytilt = json_object_get_double(obj_tmp_tmp_tmp_tmp);
-            if (json_object_object_get_ex(obj_tmp_tmp_tmp,
-                                          "time",
-                                          &obj_tmp_tmp_tmp_tmp))
-            {
-              if (i == 0)
-                dtime = 0.0;
-              else
-                dtime = (float)(json_object_get_int64(obj_tmp_tmp_tmp_tmp) - last) / 1000;
-              last = (float)json_object_get_int64(obj_tmp_tmp_tmp_tmp);
-	    }
-            mypaint_brush_stroke_to (brush,
-                                     surface,
-                                     x,
-                                     y,
-                                     pressure,
-                                     xtilt,
-                                     ytilt,
-                                     dtime,
-                                     viewzoom,
-                                     viewrotation,
-                                     barrel_rotation,
-                                     linear);
+            fclose (mediafile);
+            mediafile = NULL;
           }
-    
-          MyPaintRectangle roi;
-          MyPaintRectangles rois;
-          rois.num_rectangles = 1;
-          rois.rectangles = &roi;
-          mypaint_surface_end_atomic(surface,
-                                     &rois);
-          if (roi.width
-          && roi.height)
+        }
+        else if (strcmp(json_object_get_string (obj_action), "media") == 0)
+        { 
+          json_object *obj_time, *obj_play;
+          json_object_object_get_ex(obj,
+                                    "time",
+                                     &obj_time);
+          obj_play = json_object_new_object();
+          json_object_object_add (obj_play,
+                                  "fd",
+                                  json_object_new_int(fd));
+          json_object_object_add (obj_play,
+                                  "time",
+                                  json_object_get(obj_time));
+          // select filename from MEDIA table
+          char  sql[1024];
+          sprintf (sql,
+                   "SELECT filename FROM MEDIA WHERE time = '%s'",
+                   json_object_get_string(obj_time));
+          sqlite3_stmt* stmt;
+          sqlite3_prepare (conn,
+                           sql,
+                           -1,
+                           &stmt,
+                           NULL);
+          if (sqlite3_step (stmt) == SQLITE_ROW)
           {
-            json_object *out = json_object_new_object();
-            json_object_object_add (out,
-                                    "width",
-                                    json_object_new_int(width));
-            json_object_object_add (out,
-                                    "height",
-                                    json_object_new_int(height));
-            json_object *stroke = json_object_new_array();
-            int tiles_height = ceil((float)height / MYPAINT_TILE_SIZE);
-            int tiles_width = ceil((float)width / MYPAINT_TILE_SIZE);
-            for (int tx = floor((float)roi.x / MYPAINT_TILE_SIZE); tx < ceil((float)(roi.x + roi.width) / MYPAINT_TILE_SIZE); tx++)
+            json_object_object_add (obj_play,
+                                    "filename",
+                                    json_object_new_string((char *)sqlite3_column_text(stmt, 0)));
+          }
+          sqlite3_finalize (stmt);
+  
+          // stop current playing thread
+          if (playing)
+          {
+            playing = false;
+            pthread_join(pthread_media, NULL);
+            pthread_join(pthread_stroke, NULL);
+          }
+  
+          // send start signal to all
+          ws_sendframe_txt(fd,
+                           "{\"action\": \"start\"}",
+                           2);
+          playing = true;
+  
+          // playing the media
+          pthread_create(&pthread_media,
+                         NULL,
+                         playmedia,
+                         (void *)json_object_get(obj_play));
+          pthread_create(&pthread_stroke,
+                         NULL,
+                         playstroke,
+                         (void *)json_object_get(obj_play));
+          json_object_put(obj_play);
+        }
+        else if (strcmp(json_object_get_string (obj_action), "nick") == 0)
+        { 
+          json_object *obj_nick;
+          json_object_object_get_ex(obj,
+                                    "nickname",
+                                    &obj_nick);
+          char sql[1024];
+          sprintf (sql,
+                   "UPDATE ONLINE SET nick = '%s' WHERE fd =  %d;",
+                   json_object_get_string(obj_nick),
+                   fd);
+          sqlite3_stmt* stmt;
+          sqlite3_prepare (conn,
+                           sql,
+                           -1,
+                           &stmt,
+                           NULL);
+          sqlite3_step (stmt);
+          sqlite3_finalize (stmt);
+        }
+        else if (strcmp(json_object_get_string (obj_action), "brush") == 0)
+        { 
+          json_object *obj_brush;
+          if (json_object_object_get_ex(obj,
+                                        "brush",
+                                        &obj_brush))
+            mypaint_brush_from_string(brush,
+                                      json_object_to_json_string(obj_brush));
+        }
+        else if (strcmp(json_object_get_string (obj_action), "stroke") == 0)
+        {
+  
+          json_object *obj_width, *obj_height, *obj_stroke;
+          if (json_object_object_get_ex(obj,
+                                        "width",
+                                        &obj_width)
+          && json_object_object_get_ex(obj,
+                                        "height",
+                                        &obj_height)
+          && json_object_object_get_ex(obj,
+                                        "stroke",
+                                        &obj_stroke))
+          {
+            MyPaintSurface *surface;
+            surface = (MyPaintSurface *) mypaint_fixed_tiled_surface_new(json_object_get_int(obj_width),
+                                                                         json_object_get_int(obj_height));
+            MyPaintTiledSurface *tiled_surface = (MyPaintTiledSurface *)surface;
+            mypaint_brush_new_stroke (brush);
+            mypaint_brush_reset (brush);
+            mypaint_surface_begin_atomic (surface);
+            for (size_t i = 0;
+                 i <  json_object_array_length(obj_stroke);
+                 i++)
             {
-                for (int ty = floor((float)roi.y / MYPAINT_TILE_SIZE);
-                     ty < ceil((float)(roi.y + roi.height) / MYPAINT_TILE_SIZE);
-                     ty++)
-                {
-                    const int max_x = tx < tiles_width - 1 || width % MYPAINT_TILE_SIZE == 0 ? MYPAINT_TILE_SIZE : width % MYPAINT_TILE_SIZE;
-                    const int max_y = ty < tiles_height - 1 || height % MYPAINT_TILE_SIZE == 0 ? MYPAINT_TILE_SIZE : height % MYPAINT_TILE_SIZE;
-                    MyPaintTileRequest request;
-                    mypaint_tile_request_init(&request,
-                                              0,
-                                              tx,
-                                              ty,
-                                              TRUE);
-                    mypaint_tiled_surface_tile_request_start(tiled_surface,
-                                                             &request);
-                    for (int y = 0;
-                         y < max_y;
-                         y++)
-                    {
-                        int yy = ty * MYPAINT_TILE_SIZE + y;
-                        for (int x = 0;
-                             x < max_x;
-                             x++)
-                        {
-                            int xx = tx * MYPAINT_TILE_SIZE + x;
-                            int offset = MYPAINT_TILE_SIZE * y + x;
-                            unsigned short r = request.buffer[offset * 4];
-                            unsigned short g = request.buffer[offset * 4 + 1];
-                            unsigned short b = request.buffer[offset * 4 + 2];
-                            if (r != 0xFFFF
-                            || g != 0xFFFF
-                            || b != 0xFFFF)
-                            {
-                                r &= 0x7FFF;
-                                g &= 0x7FFF;
-                                b &= 0x7FFF;
-                
-                                json_object *pixel = json_object_new_array();
-                                json_object_array_add (pixel,
-                                                       json_object_new_int(xx));
-                                json_object_array_add (pixel,
-                                                       json_object_new_int(yy));
-                                json_object_array_add (pixel,
-                                                       json_object_new_int(r));
-                                json_object_array_add (pixel,
-                                                       json_object_new_int(g));
-                                json_object_array_add (pixel,
-                                                       json_object_new_int(b));
-                                json_object_array_add (stroke,
-                                                       pixel);
-                            }
-                        }
-                    }
-                    mypaint_tiled_surface_tile_request_end(tiled_surface,
-                                                           &request);
-                }
+              json_object *obj_motion;
+              obj_motion = json_object_array_get_idx(obj_stroke,
+                                                     i);
+              json_object *obj_tmp_tmp;
+              float            x = 0.0;
+              float            y = 0.0;
+              float     pressure = 0.5;
+              float        xtilt = 0.0;
+              float        ytilt = 0.0;
+              float        dtime = 0.0;
+              float     viewzoom = 1.0;
+              float viewrotation = 0.0;
+              float barrel_rotation = 0.0;
+              int linear = 0;
+              if (json_object_object_get_ex(obj_motion,
+                                            "x",
+                                            &obj_tmp_tmp))
+                x = json_object_get_double(obj_tmp_tmp);
+              if (json_object_object_get_ex(obj_motion,
+                                            "y",
+                                            &obj_tmp_tmp))
+                y = json_object_get_double(obj_tmp_tmp);
+              if (json_object_object_get_ex(obj_motion,
+                                            "pressure",
+                                            &obj_tmp_tmp))
+                pressure = json_object_get_double(obj_tmp_tmp);
+              if (json_object_object_get_ex(obj_stroke,
+                                            "xtilt",
+                                            &obj_tmp_tmp))
+                xtilt = json_object_get_double(obj_tmp_tmp);
+              if (json_object_object_get_ex(obj_stroke,
+                                            "ytilt",
+                                            &obj_tmp_tmp))
+                ytilt = json_object_get_double(obj_tmp_tmp);
+              if (json_object_object_get_ex(obj_stroke,
+                                            "dtime",
+                                            &obj_tmp_tmp))
+                dtime = json_object_get_int(obj_tmp_tmp);
+              mypaint_brush_stroke_to (brush,
+                                       surface,
+                                       x,
+                                       y,
+                                       pressure,
+                                       xtilt,
+                                       ytilt,
+                                       dtime,
+                                       viewzoom,
+                                       viewrotation,
+                                       barrel_rotation,
+                                       linear);
             }
-            json_object_object_add (out,
-                                    "stroke",
-                                    stroke);
-            ws_sendframe_txt(fd,
-                             json_object_to_json_string(out),
-                             2);
-            json_object_put(out);
+      
+            json_object *new_stroke;
+            new_stroke  = json_object_new_array();
+            MyPaintRectangle roi;
+            MyPaintRectangles rois;
+            rois.num_rectangles = 1;
+            rois.rectangles = &roi;
+            mypaint_surface_end_atomic(surface,
+                                       &rois);
+            if (roi.width
+            && roi.height)
+            {
+              int tiles_height = ceil(json_object_get_double(obj_height) / MYPAINT_TILE_SIZE);
+              int tiles_width = ceil(json_object_get_double(obj_width)/ MYPAINT_TILE_SIZE);
+              for (int tx = floor((float)roi.x / MYPAINT_TILE_SIZE); tx < ceil((float)(roi.x + roi.width) / MYPAINT_TILE_SIZE); tx++)
+              {
+                  for (int ty = floor((float)roi.y / MYPAINT_TILE_SIZE);
+                       ty < ceil((float)(roi.y + roi.height) / MYPAINT_TILE_SIZE);
+                       ty++)
+                  {
+                      const int max_x = tx < tiles_width - 1 || json_object_get_int(obj_width) % MYPAINT_TILE_SIZE == 0 ? MYPAINT_TILE_SIZE : json_object_get_int(obj_width) % MYPAINT_TILE_SIZE;
+                      const int max_y = ty < tiles_height - 1 || json_object_get_int(obj_height) % MYPAINT_TILE_SIZE == 0 ? MYPAINT_TILE_SIZE : json_object_get_int(obj_height) % MYPAINT_TILE_SIZE;
+                      MyPaintTileRequest request;
+                      mypaint_tile_request_init(&request,
+                                                0,
+                                                tx,
+                                                ty,
+                                                TRUE);
+                      mypaint_tiled_surface_tile_request_start(tiled_surface,
+                                                               &request);
+                      for (int y = 0;
+                           y < max_y;
+                           y++)
+                      {
+                          int yy = ty * MYPAINT_TILE_SIZE + y;
+                          for (int x = 0;
+                               x < max_x;
+                               x++)
+                          {
+                              int xx = tx * MYPAINT_TILE_SIZE + x;
+                              int offset = MYPAINT_TILE_SIZE * y + x;
+                              unsigned short r = request.buffer[offset * 4];
+                              unsigned short g = request.buffer[offset * 4 + 1];
+                              unsigned short b = request.buffer[offset * 4 + 2];
+                              if (r != 0xFFFF
+                              || g != 0xFFFF
+                              || b != 0xFFFF)
+                              {
+                                  r &= 0x7FFF;
+                                  g &= 0x7FFF;
+                                  b &= 0x7FFF;
+                  
+                                  json_object *pixel = json_object_new_array();
+                                  json_object_array_add (pixel,
+                                                         json_object_new_int(xx));
+                                  json_object_array_add (pixel,
+                                                         json_object_new_int(yy));
+                                  json_object_array_add (pixel,
+                                                         json_object_new_int(r));
+                                  json_object_array_add (pixel,
+                                                         json_object_new_int(g));
+                                  json_object_array_add (pixel,
+                                                         json_object_new_int(b));
+                                  json_object_array_add (new_stroke,
+                                                         pixel);
+                              }
+                          }
+                      }
+                      mypaint_tiled_surface_tile_request_end(tiled_surface,
+                                                             &request);
+                  }
+              }
+              json_object_object_add(obj,
+                                     "stroke",
+                                      new_stroke);
+              ws_sendframe_txt(fd,
+                               json_object_to_json_string(obj),
+                               2);
+              if (recording)
+              {
+                char sql[40960];
+                sprintf (sql,
+                         "INSERT INTO STROKE (time, stroke) VALUES (CURRENT_TIMESTAMP, '%s');",
+                         json_object_to_json_string(obj));
+                sqlite3_stmt* stmt;
+                sqlite3_prepare (conn,
+                                 sql,
+                                 -1,
+                                 &stmt,
+                                 NULL);
+                sqlite3_step (stmt);
+                sqlite3_finalize (stmt);
+              }
+            }
+            mypaint_surface_unref(surface);
           }
-          mypaint_surface_unref(surface);
-	  if (recording)
-	  {
-            dumpstroke(obj_tmp);
-	  }
         }
       }
       json_object_put(obj);
@@ -566,7 +521,31 @@ void onmessage(int fd, const unsigned char *msg, uint64_t size, int type)
                    1);
       if (recording)
       {
-        dumpmedia((const char *)msg, size);
+        if (!mediafile)
+        {
+          uuid_t binuuid;
+          char uuid[37];
+          uuid_generate_random(binuuid);
+          uuid_unparse_lower(binuuid, uuid);
+          char filename[64];
+          sprintf (filename,
+                   "/tmp/draw/data/media_%s.pcm",
+                   uuid);
+          mediafile = fopen(filename, "w");
+          char sql[1024];
+          sprintf (sql,
+                   "INSERT INTO MEDIA (time, filename) VALUES (CURRENT_TIMESTAMP, '%s');",
+                   filename);
+          sqlite3_stmt* stmt;
+          sqlite3_prepare (conn,
+                           sql,
+                           -1,
+                           &stmt,
+                           NULL);
+          sqlite3_step (stmt);
+          sqlite3_finalize (stmt);
+        }
+        fwrite(msg, 1, size, mediafile);
       }
       break;
     default:
@@ -577,7 +556,8 @@ void onmessage(int fd, const unsigned char *msg, uint64_t size, int type)
 }
 
 static void terminate()
-{
+{        
+  sqlite3_close (conn);
   exit(0);
 }
 
@@ -602,10 +582,41 @@ int main(int argc, char *argv[])
   brush = mypaint_brush_new();
   mypaint_brush_from_defaults(brush);
 
-  users = json_object_new_array();
-  dumpuser();
+  sqlite3_open ("/tmp/draw/data/stroke.db",
+                &conn);
+  char sql[1024];
+  sprintf (sql,
+           "CREATE TABLE IF NOT EXISTS ONLINE (nick, fd, time);");
+  sqlite3_stmt* stmt;
+  sqlite3_prepare (conn,
+                   sql,
+                   -1,
+                   &stmt,
+                   NULL);
+  sqlite3_step (stmt);
+  sqlite3_finalize (stmt);
 
-  recording = false;
+  sprintf (sql,
+           "CREATE TABLE IF NOT EXISTS STROKE (time, stroke);");
+  sqlite3_prepare (conn,
+                   sql,
+                   -1,
+                   &stmt,
+                   NULL);
+  sqlite3_step (stmt);
+  sqlite3_finalize (stmt);
+
+  sprintf (sql,
+           "CREATE TABLE IF NOT EXISTS MEDIA (time, filename);");
+  sqlite3_prepare (conn,
+                   sql,
+                   -1,
+                   &stmt,
+                   NULL);
+  sqlite3_step (stmt);
+  sqlite3_finalize (stmt);
+
+  recording = playing = false;
   /*
     WebSocket
   */
@@ -619,6 +630,7 @@ int main(int argc, char *argv[])
   signal(SIGINT, SIG_IGN);
   signal(SIGTERM, SIG_IGN);
   signal(SIGKILL, terminate);
+  signal(SIGABRT, terminate);
 
   ws_socket(evs, port, 0);
   free (evs);

@@ -292,7 +292,7 @@ function draw() {
         }
       }
     };
-    xhttp.open("GET", '/user/user.json', true);
+    xhttp.open("GET", '/draw/user.php', true);
     xhttp.send();
 
     document.body.insertBefore(users, undefined);
@@ -322,7 +322,7 @@ function draw() {
   media.onchange = function() {
     var msg = {
       action: 'media',
-      name: media.value
+      time: media.value
     };
     ws.send(JSON.stringify(msg));
   };
@@ -339,7 +339,7 @@ function draw() {
       }
     }
   };
-  xhttp.open("GET", '/media/media.json', true);
+  xhttp.open("GET", '/draw/media.php', true);
   xhttp.send();
   sticky.appendChild(media);
 
