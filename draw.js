@@ -44,7 +44,6 @@ function draw() {
     };
     alive_id = setInterval(() => {
       ws.send(JSON.stringify(msg));
-      console.log('PING\n');
     }, 45000);
   };
 
@@ -74,7 +73,6 @@ function draw() {
       player.buffer = buffer;
       player.connect(context.destination);
       player.start(playTime);
-      console.log(playTime - context.currentTime);
     }
     else
     {
@@ -221,7 +219,6 @@ function draw() {
     context = new (window.AudioContext || window.webkitAudioContext)({
       sampleRate: 16000
     });
-    console.log(context);
     recorder = context.createMediaStreamSource(stream);
     script = context.createScriptProcessor(8192, 1, 1);
     script.onaudioprocess = function(e) {
@@ -333,8 +330,8 @@ function draw() {
       for (var i = 0; i < mediaes.length; i++)
       {
         var option = document.createElement("option");
-        option.value = mediaes[i];
-        option.text = mediaes[i];
+        option.value = mediaes[i].time;
+        option.text = mediaes[i].time + '(' + mediaes[i].duration + ')';
         media.appendChild(option);
       }
     }
