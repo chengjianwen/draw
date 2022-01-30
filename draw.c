@@ -67,7 +67,7 @@ static void *playstroke(void *data)
   {
     char  sql[1024];
     sprintf (sql,
-            "SELECT (JulianDay(DATETIME(time, 'localtime')) - JulianDay('%s')) * 86400 AS delay, stroke FROM STROKE WHERE delay > 0 ORDER BY delay",
+            "SELECT (JulianDay(time) - JulianDay('%s')) * 86400 AS delay, stroke FROM STROKE WHERE delay > 0 ORDER BY delay",
             json_object_get_string(obj_time));
     sqlite3_stmt* stmt;
     sqlite3_prepare_v2 (conn,
@@ -75,18 +75,31 @@ static void *playstroke(void *data)
                         -1,
                         &stmt,
                         NULL);
-    struct timespec delay = {0, 0};
+    struct timespec startTime, currentTime, t;
+
+    clock_gettime(CLOCK_REALTIME, &startTime);
     while (sqlite3_step (stmt) == SQLITE_ROW)
     {
-      delay.tv_sec = sqlite3_column_int(stmt, 0) - delay.tv_sec;;
-      delay.tv_nsec = (sqlite3_column_double(stmt, 0) - delay.tv_sec) * 1000000000L - delay.tv_nsec;
-      if (delay.tv_nsec < 0)
+      t.tv_sec = sqlite3_column_int(stmt, 0);
+      t.tv_nsec = (sqlite3_column_double(stmt, 0) - t.tv_sec) * 1000000000L;
+      clock_gettime(CLOCK_REALTIME, &currentTime);
+      t.tv_sec = t.tv_sec - (currentTime.tv_sec - startTime.tv_sec);
+      t.tv_nsec = t.tv_nsec - (currentTime.tv_nsec - startTime.tv_nsec);
+      if (t.tv_nsec < 0)
       {
-        delay.tv_sec -= 1;
-        delay.tv_nsec += 1000000000L;
+        t.tv_sec -= 1;
+        t.tv_nsec += 1000000000L;
       }
-      nanosleep(&delay, NULL);
-      printf ("deley %f\n", sqlite3_column_double(stmt, 0));
+      if (t.tv_sec > 0)
+      while (t.tv_sec)
+      {
+        sleep(1);
+        t.tv_sec -= 1;
+        if (!playing)
+          break;
+      }
+      else if (t.tv_sec == 0)
+        nanosleep(&t, NULL);
       ws_sendframe_txt(json_object_get_int(obj_fd),
                        (char *)sqlite3_column_text(stmt, 1),
                        2);
@@ -142,6 +155,7 @@ static void *playmedia(void *data)
       fclose (fp);
     }
   }
+  playing = false;
   json_object_put (obj);
   return NULL;
 }
@@ -294,7 +308,7 @@ void onmessage(int fd, const unsigned char *msg, uint64_t size, int type)
           // select filename from MEDIA table
           char  sql[1024];
           sprintf (sql,
-                   "SELECT filename FROM MEDIA WHERE datetime(time, 'localtime') = '%s'",
+                   "SELECT filename FROM MEDIA WHERE time = '%s'",
                    json_object_get_string(obj_time));
           sqlite3_stmt* stmt;
           sqlite3_prepare_v2 (conn,
@@ -312,13 +326,10 @@ void onmessage(int fd, const unsigned char *msg, uint64_t size, int type)
   
           // stop current playing thread
           if (playing)
-          {
             playing = false;
-	    pthread_cancel (pthread_media);
-	    pthread_cancel (pthread_stroke);
-            pthread_join(pthread_media, NULL);
-            pthread_join(pthread_stroke, NULL);
-          }
+
+          pthread_join(pthread_media, NULL);
+          pthread_join(pthread_stroke, NULL);
   
           // send start signal to all
           ws_sendframe_txt(fd,

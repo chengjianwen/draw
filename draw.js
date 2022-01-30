@@ -76,6 +76,7 @@ function draw() {
     }
     else
     {
+      console.log(event.data);
       var obj = JSON.parse (event.data);
       if (obj.action == 'pong')
       { 
@@ -331,7 +332,7 @@ function draw() {
       {
         var option = document.createElement("option");
         option.value = mediaes[i].time;
-        option.text = mediaes[i].time + '(' + mediaes[i].duration + ')';
+        option.text = mediaes[i].localtime + '(' + mediaes[i].duration + ')';
         media.appendChild(option);
       }
     }

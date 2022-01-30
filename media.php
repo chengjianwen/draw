@@ -1,7 +1,6 @@
 <?php
 $conn = new SQLite3('/tmp/draw/data/stroke.db');
-//$result = $conn->query("SELECT json_group_array (datetime(time, 'localtime')) FROM (SELECT time FROM MEDIA ORDER BY time DESC)");
-$results = $conn->query("SELECT datetime(time, 'localtime') AS time, filename FROM MEDIA ORDER BY time DESC");
+$results = $conn->query("SELECT datetime(time, 'localtime') AS localtime, time, filename FROM MEDIA ORDER BY time DESC");
 $data = array();
 while ($result = $results->fetchArray(SQLITE3_ASSOC))
 {
@@ -27,6 +26,5 @@ while ($result = $results->fetchArray(SQLITE3_ASSOC))
 	$data[] = $result;
 }
 
-//var_dump ($data);
 echo json_encode ($data);
 echo "\n";
