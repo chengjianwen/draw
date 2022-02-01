@@ -27,7 +27,7 @@
 #include <uuid/uuid.h>
 #include <ws.h>
 
-//#define DISABLE_VERBOSE 1
+#define DISABLE_VERBOSE 1
 
 MyPaintBrush *brush;
 bool         recording;
@@ -131,12 +131,12 @@ static void *playmedia(void *data)
       // send media to broadcast
       struct timespec startTime;
       clock_gettime(CLOCK_REALTIME, &startTime);
-      char buf[8192];
-      while (playing && fread(buf, 1, 8192, fp) == 8192)
+      char buf[16384];
+      while (playing && fread(buf, 1, 16384, fp) == 16384)
       {
         ws_sendframe_bin(json_object_get_int(obj_fd),
                          (const char *)buf,
-                         8192,
+                         16384,
                          2);
         struct timespec now, delay;
         clock_gettime(CLOCK_REALTIME, &now);
@@ -294,22 +294,22 @@ void onmessage(int fd, const unsigned char *msg, uint64_t size, int type)
         }
         else if (strcmp(json_object_get_string (obj_action), "media") == 0)
         { 
-          json_object *obj_time, *obj_play;
+          json_object *obj_uuid, *obj_play;
           json_object_object_get_ex(obj,
-                                    "time",
-                                     &obj_time);
+                                    "uuid",
+                                     &obj_uuid);
           obj_play = json_object_new_object();
           json_object_object_add (obj_play,
                                   "fd",
                                   json_object_new_int(fd));
           json_object_object_add (obj_play,
-                                  "time",
-                                  json_object_get(obj_time));
+                                  "uuid",
+                                  json_object_get(obj_uuid));
           // select filename from MEDIA table
           char  sql[1024];
           sprintf (sql,
-                   "SELECT filename FROM MEDIA WHERE time = '%s'",
-                   json_object_get_string(obj_time));
+                   "SELECT filename, time FROM MEDIA WHERE uuid = '%s'",
+                   json_object_get_string(obj_uuid));
           sqlite3_stmt* stmt;
           sqlite3_prepare_v2 (conn,
                               sql,
@@ -321,6 +321,9 @@ void onmessage(int fd, const unsigned char *msg, uint64_t size, int type)
             json_object_object_add (obj_play,
                                     "filename",
                                     json_object_new_string((char *)sqlite3_column_text(stmt, 0)));
+            json_object_object_add (obj_play,
+                                    "time",
+                                    json_object_new_string((char *)sqlite3_column_text(stmt, 1)));
           }
           sqlite3_finalize (stmt);
   
@@ -377,7 +380,7 @@ void onmessage(int fd, const unsigned char *msg, uint64_t size, int type)
         else if (strcmp(json_object_get_string (obj_action), "stroke") == 0)
         {
   
-          json_object *obj_width, *obj_height, *obj_stroke;
+          json_object *obj_width, *obj_height, *obj_linewidth, *obj_stroke;
           if (json_object_object_get_ex(obj,
                                         "width",
                                         &obj_width)
@@ -385,9 +388,24 @@ void onmessage(int fd, const unsigned char *msg, uint64_t size, int type)
                                         "height",
                                         &obj_height)
           && json_object_object_get_ex(obj,
+                                        "linewidth",
+                                        &obj_linewidth)
+          && json_object_object_get_ex(obj,
                                         "stroke",
                                         &obj_stroke))
           {
+            json_object_object_add(obj,
+                                   "width",
+                                   json_object_new_int(json_object_get_int(obj_width) * json_object_get_int(obj_linewidth)));
+            json_object_object_add(obj,
+                                   "height",
+                                   json_object_new_int(json_object_get_int(obj_height) * json_object_get_int(obj_linewidth)));
+            json_object_object_get_ex(obj,
+                                      "width",
+                                      &obj_width);
+            json_object_object_get_ex(obj,
+                                      "height",
+                                      &obj_height);
             MyPaintSurface *surface;
             surface = (MyPaintSurface *) mypaint_fixed_tiled_surface_new(json_object_get_int(obj_width),
                                                                          json_object_get_int(obj_height));
@@ -416,11 +434,11 @@ void onmessage(int fd, const unsigned char *msg, uint64_t size, int type)
               if (json_object_object_get_ex(obj_motion,
                                             "x",
                                             &obj_tmp_tmp))
-                x = json_object_get_double(obj_tmp_tmp);
+                x = json_object_get_double(obj_tmp_tmp) * json_object_get_int(obj_linewidth);
               if (json_object_object_get_ex(obj_motion,
                                             "y",
                                             &obj_tmp_tmp))
-                y = json_object_get_double(obj_tmp_tmp);
+                y = json_object_get_double(obj_tmp_tmp) * json_object_get_int(obj_linewidth);
               if (json_object_object_get_ex(obj_motion,
                                             "pressure",
                                             &obj_tmp_tmp))
@@ -436,7 +454,7 @@ void onmessage(int fd, const unsigned char *msg, uint64_t size, int type)
               if (json_object_object_get_ex(obj_stroke,
                                             "dtime",
                                             &obj_tmp_tmp))
-                dtime = json_object_get_int(obj_tmp_tmp);
+                dtime = json_object_get_double(obj_tmp_tmp) / 1000;
               mypaint_brush_stroke_to (brush,
                                        surface,
                                        x,
@@ -573,8 +591,9 @@ void onmessage(int fd, const unsigned char *msg, uint64_t size, int type)
           mediafile = fopen(filename, "w");
           char sql[1024];
           sprintf (sql,
-                   "INSERT INTO MEDIA (time, filename) VALUES ('%s', '%s')",
+                   "INSERT INTO MEDIA (time, uuid, filename) VALUES ('%s', '%s', '%s')",
                    current_timestamp(),
+                   (char *)uuid,
                    filename);
           sqlite3_exec (conn,
                         sql,
@@ -623,7 +642,7 @@ int main(int argc, char *argv[])
                 &conn);
   char *sql[] = {"CREATE TABLE IF NOT EXISTS ONLINE (nick, fd, time)",
                 "CREATE TABLE IF NOT EXISTS STROKE (time, stroke)",
-                "CREATE TABLE IF NOT EXISTS MEDIA (time, filename)",
+                "CREATE TABLE IF NOT EXISTS MEDIA (time, uuid, filename, name)",
                 "DELETE FROM ONLINE"};
   for (int i = 0; i < 4; i++)
   {

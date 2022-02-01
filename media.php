@@ -1,10 +1,10 @@
 <?php
 $conn = new SQLite3('/tmp/draw/data/stroke.db');
-$results = $conn->query("SELECT datetime(time, 'localtime') AS localtime, time, filename FROM MEDIA ORDER BY time DESC");
+$results = $conn->query("SELECT uuid, name, filename FROM MEDIA ORDER BY time DESC");
 $data = array();
 while ($result = $results->fetchArray(SQLITE3_ASSOC))
 {
-	$duration = intdiv(filesize($result['filename']), 16000);
+	$duration = intdiv(filesize($result['filename']), 16000) / 2;
 	unset($result['filename']);
 	if ($duration < 60)
 	  $result['duration'] = "less 1 minute";

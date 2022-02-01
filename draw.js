@@ -7,15 +7,15 @@ function draw() {
   var context;
   var recorder;
   var script;
-  var player;
   var startTime;
   var count;
   var canvas;
-  var timer;
+  var timer_id;
   var alive_id;
   var stroke;
   var sticky;
   var record;
+  var play;
   var brush;
   var clear;
   var user;
@@ -39,6 +39,7 @@ function draw() {
     brush.disabled = '';
     clear.disabled = '';
     user.disabled = '';
+    media.disabled = '';
     var msg = {
       action: 'ping'
     };
@@ -53,6 +54,7 @@ function draw() {
     brush.disabled = 'true';
     clear.disabled = 'true';
     user.disabled = 'true';
+    media.disabled = 'true';
   };
 
   ws.onerror = function() {
@@ -63,20 +65,18 @@ function draw() {
     {
       count++;
       var playTime = startTime + count * 0.512;
-      var int8 = new Int8Array(event.data);
-      var buffer = context.createBuffer(1, int8.length, context.sampleRate);
-      for (var i = 0; i < int8.length; i++)
-      {
-        buffer.getChannelData(0)[i] = int8[i] / 127;
-      }
-      player = context.createBufferSource();
+      var int16 = new Int16Array(event.data);
+      var buffer = context.createBuffer(1, int16.length, context.sampleRate);
+      for (var i = 0; i < int16.length; i++)
+        buffer.getChannelData(0)[i] = int16[i] / 65536;
+
+      var player = context.createBufferSource();
       player.buffer = buffer;
       player.connect(context.destination);
       player.start(playTime);
     }
     else
     {
-      console.log(event.data);
       var obj = JSON.parse (event.data);
       if (obj.action == 'pong')
       { 
@@ -94,9 +94,10 @@ function draw() {
       {
         var radioWidth  = obj.width / canvas.width;
         var radioHeight = obj.height / canvas.height;
+        var linewidth = obj.linewidth;
         var radio       = Math.max(radioWidth, radioHeight);
         var ctx         = canvas.getContext('2d');
-        ctx.lineWidth   = 0.1;
+        ctx.lineWidth   = 1 / linewidth;
         for (var i = 0; i < obj.stroke.length; i++)
         {
           var x           = obj.stroke[i][0];
@@ -105,7 +106,7 @@ function draw() {
           var g           = obj.stroke[i][3];
           var b           = obj.stroke[i][4];
           ctx.strokeStyle = 'rgb(' + r / 256 + ',' + g / 256 + ',' + b / 256 + ')';
-          ctx.strokeRect(x / radio, y / radio, 0.1, 0.1);
+          ctx.strokeRect(x / radio, y / radio, 1 / linewidth, 1 / linewidth);
         }
       }
     }
@@ -160,6 +161,7 @@ function draw() {
             brush.disabled = '';
             clear.disabled = '';
             user.disabled = '';
+            media.disabled = '';
             available.remove();
             xhttp.onreadystatechange = function() {
               if (this.readyState == 4 && this.status == 200) {
@@ -185,6 +187,7 @@ function draw() {
     brush.disabled = 'true';
     clear.disabled = 'true';
     user.disabled = 'true';
+    media.disabled = 'true';
   }
   sticky.appendChild(brush);
 
@@ -205,14 +208,6 @@ function draw() {
   }
   sticky.appendChild(clear);
 
-  // 开始/停止按钮，用户按下后，输入的笔迹和声音将被发送到WebSocket服务器
-  record = document.createElement("button");
-  record.innerHTML = "🔇";
-  record.style.padding = '5px';
-  record.style.margin = '5px';
-  record.onclick = start;
-  sticky.appendChild(record);
-
   navigator.mediaDevices.getUserMedia({
     audio: true
   }).then (function(stream) {
@@ -225,33 +220,12 @@ function draw() {
     script.onaudioprocess = function(e) {
       var audio = e.inputBuffer.getChannelData(0);
       var float32 = new Float32Array(audio);
-      var int8 = new Int8Array(float32.length);
-      for (var i = 0; i < int8.length; i++)
-        int8[i] = float32[i] * 127;
-      ws.send(int8.buffer);
+      var int16 = new Int16Array(float32.length);
+      for (var i = 0; i < int16.length; i++)
+        int16[i] = float32[i] * 65536;
+      ws.send(int16.buffer);
     }
   });
-  function start(e) {
-    var msg = {
-      action: 'start'
-    };
-    ws.send(JSON.stringify(msg));
-    record.innerHTML = "🔊";
-    recorder.connect(script);
-    script.connect(context.destination);
-    record.onclick = stop;
-  };
-// 结束录音
-  function stop(e) {
-    var msg = {
-      action: 'stop'
-    };
-    ws.send(JSON.stringify(msg));
-    recorder.disconnect();
-    script.disconnect();
-    record.innerHTML = "🔇";
-    record.onclick = start;
-  }
 
   user = document.createElement("button");
   user.innerHTML = "🧍";
@@ -274,6 +248,7 @@ function draw() {
       brush.disabled = '';
       clear.disabled = '';
       user.disabled = '';
+      media.disabled = '';
       users.remove();
     }
 
@@ -298,6 +273,7 @@ function draw() {
     brush.disabled = 'true';
     clear.disabled = 'true';
     user.disabled = 'true';
+    media.disabled = 'true';
   }
   sticky.appendChild(user);
 
@@ -311,19 +287,14 @@ function draw() {
       nickname: nick.value
     };
     ws.send(JSON.stringify(msg));
+    record.style.display = nick.value == '' ? 'none' : 'block';
   }
   sticky.appendChild(nick);
 
+  //媒体内容选择列表
   media = document.createElement("select");
   media.style.padding = '5px';
   media.style.margin = '5px';
-  media.onchange = function() {
-    var msg = {
-      action: 'media',
-      time: media.value
-    };
-    ws.send(JSON.stringify(msg));
-  };
   var xhttp = new XMLHttpRequest();
   xhttp.onreadystatechange = function() {
     if (this.readyState == 4 && this.status == 200) {
@@ -331,8 +302,8 @@ function draw() {
       for (var i = 0; i < mediaes.length; i++)
       {
         var option = document.createElement("option");
-        option.value = mediaes[i].time;
-        option.text = mediaes[i].localtime + '(' + mediaes[i].duration + ')';
+        option.value = mediaes[i].uuid;
+        option.text = mediaes[i].name + '(' + mediaes[i].duration + ')';
         media.appendChild(option);
       }
     }
@@ -341,39 +312,79 @@ function draw() {
   xhttp.send();
   sticky.appendChild(media);
 
-  timer = document.createElement("button");
-  timer = document.createElement("button");
-  timer.innerHTML = "0";
-  timer.style.padding = '5px';
-  timer.style.margin = '5px';
-  timer.style.position = 'absolute';
-  timer.style.right= '0';
-  timer.style.top = '0';
-  setInterval(() => {
-    var v = timer.innerHTML.split(':');
-    v[v.length - 1] = parseInt(v[v.length - 1]) + 1;
-    if (v[v.length - 1] > 59)
-    {
-      v[v.length - 1] = '0';
-      if (v.length < 2)
-        v.unshift('0');
-      v[v.length - 2] = parseInt(v[v.length - 2]) + 1;
-      if (v[v.length - 2] > 59)
+  // 播放，用户按下后，播放所选择的媒体内容
+  play = document.createElement("button");
+  play.innerHTML = "▷";
+  play.style.padding = '5px';
+  play.style.margin = '5px';
+  play.onclick = function() {
+    var msg = {
+      action: 'media',
+      uuid: media.value
+    };
+    ws.send(JSON.stringify(msg));
+  };
+  sticky.appendChild(play);
+
+  // 开始/停止按钮，用户按下后，输入的笔迹和声音将被发送到WebSocket服务器
+  record = document.createElement("button");
+  record.innerHTML = "⚫";
+  record.style.position = 'absolute';
+  record.style.right= '0';
+  record.style.top = '0';
+  record.style.padding = '5px';
+  record.style.margin = '5px';
+  record.style.display = 'none';
+  record.onclick = start;
+
+  function start(e) {
+    var msg = {
+      action: 'start'
+    };
+    ws.send(JSON.stringify(msg));
+    record.innerHTML = "0";
+    recorder.connect(script);
+    script.connect(context.destination);
+    record.onclick = stop;
+    timer_id = setInterval(() => {
+      var v = record.innerHTML.split(':');
+      v[v.length - 1] = parseInt(v[v.length - 1]) + 1;
+      if (v[v.length - 1] > 59)
       {
-        v[v.length - 2] = '0';
-        if (v.length < 3)
+        v[v.length - 1] = '0';
+        if (v.length < 2)
           v.unshift('0');
-        v[v.length - 3] = parseInt(v[v.length - 3]) + 1;
+        v[v.length - 2] = parseInt(v[v.length - 2]) + 1;
+        if (v[v.length - 2] > 59)
+        {
+          v[v.length - 2] = '0';
+          if (v.length < 3)
+            v.unshift('0');
+          v[v.length - 3] = parseInt(v[v.length - 3]) + 1;
+        }
       }
-    }
-    for (var i = 0; i < v.length; i++)
-    {
-      v[i] = v[i].toString();
-      if (v[i].length == 1)
-        v[i] = '0' + v[i];
-    }
-    timer.innerHTML = v.join(':');
-  }, 1000);
+      for (var i = 0; i < v.length; i++)
+      {
+        v[i] = v[i].toString();
+        if (v[i].length == 1)
+          v[i] = '0' + v[i];
+      }
+      record.innerHTML = v.join(':');
+    }, 1000);
+  };
+
+// 结束录音
+  function stop(e) {
+    var msg = {
+      action: 'stop'
+    };
+    ws.send(JSON.stringify(msg));
+    recorder.disconnect();
+    script.disconnect();
+    record.innerHTML = "⚫";
+    clearInterval (timer_id);
+    record.onclick = start;
+  }
 
   // 绘制区
   canvas = document.createElement("canvas");
@@ -401,22 +412,18 @@ function draw() {
 
   // 当绘笔抬起时，将收集到的绘笔的移动轨迹信息发送给服务器
   canvas.onpointerup = function() {
-    for (var i = 0; i < stroke.length; i++)
-    {
-      stroke[i].x = stroke[i].x * 10;
-      stroke[i].y = stroke[i].y * 10;
-    }
     var msg = {
       action: 'stroke',
-      width: canvas.width * 10,
-      height: canvas.height * 10,
+      width: canvas.width,
+      height: canvas.height,
+      linewidth: 5,
       stroke: stroke
     };
     ws.send(JSON.stringify(msg));
     canvas.onpointermove = null;
   }
 
-  document.body.insertBefore(timer, undefined);
-  document.body.insertBefore(sticky, timer);
+  document.body.insertBefore(record, undefined);
+  document.body.insertBefore(sticky, record);
   document.body.insertBefore(canvas, sticky);
 }
